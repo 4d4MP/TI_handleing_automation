@@ -20,17 +20,17 @@ Sentinel incident trigger
   │
   ├─► Entities - Get IPs          (Sentinel connector)
   │
-  ├─► Get_AbuseIPDB_key           (Key Vault, secureData)
   ├─► Get_Jira_password           (Key Vault, secureData)
+  │   (AbuseIPDB auth is bound to the OMS-owned AbuseIPDBAPI connection — no KV fetch.)
   │
-  ├─► AbuseIPDB_health_check (GET /check?ipAddress=8.8.8.8)
+  ├─► AbuseIPDB_health_check (AbuseIPDBAPI GET /check?ipAddress=8.8.8.8)
   │       │
   │       └─(Failed/TimedOut)─► Comment + Terminate(Failed)
   │
   ├─► Initialize Kept_IPs, Report_Rows (arrays)
   │
   ├─► Foreach IP in body('Entities - Get IPs').IPs  (sequential)
-  │       ├─ HTTP GET /api/v2/check?ipAddress=<ip>
+  │       ├─ AbuseIPDBAPI GET /check?ipAddress=<ip>
   │       ├─ Append row to Report_Rows
   │       └─ If totalReports >= MinReports AND toLower(isp) NOT in ExcludedISPs:
   │             └─ Append ip to Kept_IPs
@@ -60,9 +60,12 @@ Sentinel incident trigger
 | Resource | Type | Purpose |
 |---|---|---|
 | `Microsoft.Logic/workflows` | Logic App (Consumption) | The playbook itself, with a system-assigned managed identity. |
-| `Microsoft.Web/connections` (azuresentinel) | API connection | Sentinel incident trigger + `entities/ip` + comments. Auth: managed identity. |
-| `Microsoft.Web/connections` (keyvault) | API connection | Reads two secrets (AbuseIPDB key and Jira password). Auth: managed identity. |
+| `Microsoft.Web/connections` (azuresentinel) | API connection — created by this template | Sentinel incident trigger + `entities/ip` + comments. Auth: managed identity. |
+| `Microsoft.Web/connections` (keyvault) | API connection — created by this template | Reads the Jira service-account password. Auth: managed identity. |
+| `Microsoft.Web/connections/abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` | API connection — **OMS-owned, referenced not created** | Backs the `AbuseIPDBAPI` custom connector. Carries its own AbuseIPDB API key inside the connection resource. |
 | Static-site storage account | External | Hosts the blocklist blob (`$web/index.html`). |
+
+AbuseIPDB calls go through the OMS-owned `AbuseIPDBAPI` custom connector (cross-RG reference to `LSY_WEUR_ITCS_PRD_OMS_RG_001`). This playbook references the existing connection by resource ID; it does not create, modify, or rotate it.
 
 Blob storage is intentionally **not** behind an API connection. The Logic App calls `https://<account>.blob.core.windows.net/$web/index.html` directly using the managed identity (`audience=https://storage.azure.com/`), avoiding the connector's double-URL-encoded path for the `$web` container.
 
@@ -73,8 +76,10 @@ Grant on the Logic App's system-assigned identity after first deploy (the ARM te
 | Scope | Role | Why |
 |---|---|---|
 | Sentinel workspace | `Microsoft Sentinel Responder` | Read incident entities, add comments. |
-| Key Vault holding the secrets | `Key Vault Secrets User` | Read AbuseIPDB key and Jira password. |
+| Key Vault holding the Jira secret | `Key Vault Secrets User` | Read the Jira service-account password. (No AbuseIPDB secret in KV — the OMS connection carries its own auth.) |
 | Blocklist storage account | `Storage Blob Data Contributor` | GET + PUT on `$web/index.html`. |
+
+The managed identity does **not** need any permission on the AbuseIPDB connection itself; the API key is baked into the OMS connection resource and used by the Logic Apps runtime when the action is invoked through it.
 
 ## Filter semantics
 
@@ -119,7 +124,8 @@ Mitigation is operational rather than in-workflow: after a burst of approvals, a
 - **Two HTTP calls to AbuseIPDB per IP would be wasteful**, so the script makes one call per IP and reuses the result for both the report row and the filter decision.
 - **Multipart attachment via HTTP action.** Jira's `/attachments` endpoint requires `multipart/form-data` and `X-Atlassian-Token: no-check`; Logic Apps supports this natively via `body.$multipart`.
 - **Blob via HTTP + managed identity** rather than the Azure Blob connector to avoid the `$web`-container double-encoding gotcha in the V2 connector path.
-- **Secrets are flagged `secureData`** on all relevant Key Vault and Jira/AbuseIPDB HTTP actions, so values never appear in run history.
+- **Secrets are flagged `secureData`** on the `Get_Jira_password` action (the only Key Vault retrieval left) and on the Jira HTTP calls that include the Basic auth header. AbuseIPDB has no `secureData` flag because the key never enters the workflow — it's bound to the OMS connection.
+- **Shared OMS AbuseIPDB connection** rather than a per-playbook custom connector + KV-stored key. Saves a moving part (no key to rotate, no KV access policy) and matches how the existing `abuseipdb_enrichment.json` playbook already calls AbuseIPDB. Trade-off: an OMS-side rotation, rename, or deletion of `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` will break this playbook, since the connection is referenced by absolute resource ID.
 
 ## Reference workflows
 

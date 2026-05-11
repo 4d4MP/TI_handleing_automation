@@ -4,7 +4,7 @@
 
 When a Sentinel incident fires and the playbook runs, the analyst will see one of three comment shapes on the incident:
 
-1. **AbuseIPDB unreachable** — health-check failed. Nothing else happened; no Jira ticket exists, blocklist is untouched. Action: check AbuseIPDB status / KV secret rotation and re-run the playbook manually on the incident.
+1. **AbuseIPDB unreachable** — health-check failed. Nothing else happened; no Jira ticket exists, blocklist is untouched. Action: check AbuseIPDB status and that the OMS connection `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` is still authorised, then re-run the playbook manually on the incident.
 2. **Playbook finished without action** — every IP either had fewer than `MinReports` AbuseIPDB reports or belonged to an excluded ISP. No Jira ticket, no blocklist change. No action needed.
 3. **Approval ticket opened** — comment contains a Trackspace URL (e.g. `https://trackspace.lhsystems.com/browse/CLOPSSEC-12345`). The playbook is now polling that ticket every 5 minutes.
 
@@ -95,8 +95,7 @@ The Logic App's parameters can be edited in the Azure portal (`Logic app → Edi
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Run history shows `Get_AbuseIPDB_key` failed with 403 | Managed identity missing `Key Vault Secrets User` | Grant the role on the KV. |
-| `AbuseIPDB_health_check` 401 | Key in KV is wrong or expired | Rotate `abuseipdb-apikey` secret. |
+| `AbuseIPDB_health_check` 401/403 | OMS AbuseIPDB connection auth expired, or the API key bound to the connection was rotated. | Contact OMS to re-authorise `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` in `LSY_WEUR_ITCS_PRD_OMS_RG_001`. |
 | `AbuseIPDB_health_check` 429 | Rate-limited | Wait it out; consider reducing playbook trigger volume or upgrading the AbuseIPDB plan. |
 | `Create_Jira_Task` 401 | Trackspace password rotated | Update `sentinelsvc` secret in KV. |
 | `Create_Jira_Task` 400 with `issuetype` error | `JiraIssueTypeName` doesn't exist in CLOPSSEC | Adjust the parameter to a valid issue-type name. |

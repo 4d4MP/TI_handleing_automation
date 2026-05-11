@@ -20,9 +20,6 @@
         "JiraKeyVaultSecretName": {
             "value": "sentinelsvc"
         },
-        "AbuseIPDBKeyVaultSecretName": {
-            "value": "abuseipdb-apikey"
-        },
         "JiraProjectKey": {
             "value": "CLOPSSEC"
         },
