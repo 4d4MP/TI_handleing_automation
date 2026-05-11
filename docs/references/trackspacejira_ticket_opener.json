@@ -1,0 +1,551 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Microsoft_Sentinel_incident_triggered": {
+                "type": "ApiConnectionWebhook",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                        }
+                    },
+                    "body": {
+                        "callback_url": "@{listCallbackUrl()}"
+                    },
+                    "path": "/incident-creation"
+                }
+            }
+        },
+        "actions": {
+            "Determine_Incident_Severity": {
+                "runAfter": {
+                    "Get_password_of_Jira_user": [
+                        "Succeeded"
+                    ]
+                },
+                "cases": {
+                    "SEV_HIG": {
+                        "case": "High",
+                        "actions": {
+                            "Add_comment_to_incident_(V3)": {
+                                "runAfter": {
+                                    "Parse_\"Create_HIGH_Jira_Ticket\"_Body": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                        }
+                                    },
+                                    "method": "post",
+                                    "body": {
+                                        "incidentArmId": "@triggerBody()?['object']?['id']",
+                                        "message": "<p>@{body('Parse_\"Create_HIGH_Jira_Ticket\"_Body')?['self']}</p>"
+                                    },
+                                    "path": "/Incidents/Comment"
+                                }
+                            },
+                            "Create_HIGH_Jira_Ticket": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                                    "method": "POST",
+                                    "headers": {
+                                        "Content-Type": "application/json"
+                                    },
+                                    "body": {
+                                        "fields": {
+                                            "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}",
+                                            "description": " @{triggerBody()?['object']?['properties']?['description']}\n\n This alert was generated based on the following event log: \n @{triggerBody()?['object']?['properties']?['incidentUrl']}",
+                                            "issuetype": {
+                                                "id": "10"
+                                            },
+                                            "priority": {
+                                                "id": "10112"
+                                            },
+                                            "project": {
+                                                "key": "CLOPSSEC"
+                                            },
+                                            "summary": "@{triggerBody()?['object']?['properties']?['title']}"
+                                        }
+                                    },
+                                    "authentication": {
+                                        "password": "@body('Get_password_of_Jira_user')?['value']",
+                                        "type": "Basic",
+                                        "username": "@parameters('JIRAUserName')"
+                                    }
+                                }
+                            },
+                            "Parse_\"Create_HIGH_Jira_Ticket\"_Body": {
+                                "runAfter": {
+                                    "Create_HIGH_Jira_Ticket": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Create_HIGH_Jira_Ticket')",
+                                    "schema": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "string"
+                                            },
+                                            "key": {
+                                                "type": "string"
+                                            },
+                                            "self": {
+                                                "type": "string"
+                                            },
+                                            "transition": {
+                                                "properties": {
+                                                    "errorCollection": {
+                                                        "properties": {
+                                                            "errorMessages": {
+                                                                "type": "array"
+                                                            },
+                                                            "errors": {
+                                                                "properties": {},
+                                                                "type": "object"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "status": {
+                                                        "type": "integer"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "SEV_LOW": {
+                        "case": "Low",
+                        "actions": {
+                            "Add_comment_to_LOW_incident": {
+                                "runAfter": {
+                                    "Parse_\"Create_LOW_Jira_Ticket\"_Body": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                        }
+                                    },
+                                    "method": "post",
+                                    "body": {
+                                        "incidentArmId": "@triggerBody()?['object']?['id']",
+                                        "message": "<p>@{body('Parse_\"Create_LOW_Jira_Ticket\"_Body')?['self']}</p>"
+                                    },
+                                    "path": "/Incidents/Comment"
+                                }
+                            },
+                            "Create_LOW_Jira_Ticket": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                                    "method": "POST",
+                                    "headers": {
+                                        "Content-Type": "application/json"
+                                    },
+                                    "body": {
+                                        "fields": {
+                                            "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}",
+                                            "description": " @{triggerBody()?['object']?['properties']?['description']}\n\n This alert was generated based on the following event log: \n @{triggerBody()?['object']?['properties']?['incidentUrl']}",
+                                            "issuetype": {
+                                                "id": "10"
+                                            },
+                                            "priority": {
+                                                "id": "10114"
+                                            },
+                                            "project": {
+                                                "key": "CLOPSSEC"
+                                            },
+                                            "summary": "@{triggerBody()?['object']?['properties']?['title']}"
+                                        }
+                                    },
+                                    "authentication": {
+                                        "password": "@body('Get_password_of_Jira_user')?['value']",
+                                        "type": "Basic",
+                                        "username": "@parameters('JIRAUserName')"
+                                    }
+                                }
+                            },
+                            "Parse_\"Create_LOW_Jira_Ticket\"_Body": {
+                                "runAfter": {
+                                    "Create_LOW_Jira_Ticket": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Create_LOW_Jira_Ticket')",
+                                    "schema": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "string"
+                                            },
+                                            "key": {
+                                                "type": "string"
+                                            },
+                                            "self": {
+                                                "type": "string"
+                                            },
+                                            "transition": {
+                                                "properties": {
+                                                    "errorCollection": {
+                                                        "properties": {
+                                                            "errorMessages": {
+                                                                "type": "array"
+                                                            },
+                                                            "errors": {
+                                                                "properties": {},
+                                                                "type": "object"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "status": {
+                                                        "type": "integer"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "SEV_MED": {
+                        "case": "Medium",
+                        "actions": {
+                            "Add_comment_to_MEDIUM_incident": {
+                                "runAfter": {
+                                    "Parse_\"Create_MEDIUM_Jira_Ticket\"_Body": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                        }
+                                    },
+                                    "method": "post",
+                                    "body": {
+                                        "incidentArmId": "@triggerBody()?['object']?['id']",
+                                        "message": "<p>@{body('Parse_\"Create_MEDIUM_Jira_Ticket\"_Body')?['self']}</p>"
+                                    },
+                                    "path": "/Incidents/Comment"
+                                }
+                            },
+                            "Create_MEDIUM_Jira_Ticket": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                                    "method": "POST",
+                                    "headers": {
+                                        "Content-Type": "application/json"
+                                    },
+                                    "body": {
+                                        "fields": {
+                                            "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}",
+                                            "description": " @{triggerBody()?['object']?['properties']?['description']}\n\n This alert was generated based on the following event log: \n @{triggerBody()?['object']?['properties']?['incidentUrl']}",
+                                            "issuetype": {
+                                                "id": "10"
+                                            },
+                                            "priority": {
+                                                "id": "10113"
+                                            },
+                                            "project": {
+                                                "key": "CLOPSSEC"
+                                            },
+                                            "summary": "@{triggerBody()?['object']?['properties']?['title']}"
+                                        }
+                                    },
+                                    "authentication": {
+                                        "password": "@body('Get_password_of_Jira_user')?['value']",
+                                        "type": "Basic",
+                                        "username": "@parameters('JIRAUserName')"
+                                    }
+                                }
+                            },
+                            "Parse_\"Create_MEDIUM_Jira_Ticket\"_Body": {
+                                "runAfter": {
+                                    "Create_MEDIUM_Jira_Ticket": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Create_MEDIUM_Jira_Ticket')",
+                                    "schema": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "string"
+                                            },
+                                            "key": {
+                                                "type": "string"
+                                            },
+                                            "self": {
+                                                "type": "string"
+                                            },
+                                            "transition": {
+                                                "properties": {
+                                                    "errorCollection": {
+                                                        "properties": {
+                                                            "errorMessages": {
+                                                                "type": "array"
+                                                            },
+                                                            "errors": {
+                                                                "properties": {},
+                                                                "type": "object"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "status": {
+                                                        "type": "integer"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "SEV_INFO": {
+                        "case": "Informational",
+                        "actions": {
+                            "Create_INFO_Jira_Ticket": {
+                                "runAfter": {
+                                    "Update_incident": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                                    "method": "POST",
+                                    "headers": {
+                                        "Content-Type": "application/json"
+                                    },
+                                    "body": {
+                                        "fields": {
+                                            "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}",
+                                            "description": " @{triggerBody()?['object']?['properties']?['description']}\n\n This alert was generated based on the following event log: \n @{triggerBody()?['object']?['properties']?['incidentUrl']}",
+                                            "issuetype": {
+                                                "id": "10"
+                                            },
+                                            "priority": {
+                                                "id": "10114"
+                                            },
+                                            "project": {
+                                                "key": "CLOPSSEC"
+                                            },
+                                            "summary": "@{triggerBody()?['object']?['properties']?['title']}"
+                                        }
+                                    },
+                                    "authentication": {
+                                        "type": "Basic",
+                                        "username": "@{parameters('JIRAUserName')}",
+                                        "password": "@{body('Get_password_of_Jira_user')?['value']}"
+                                    }
+                                },
+                                "runtimeConfiguration": {
+                                    "contentTransfer": {
+                                        "transferMode": "Chunked"
+                                    }
+                                }
+                            },
+                            "Parse_\"Create_INFO_Jira_Ticket\"_Body": {
+                                "runAfter": {
+                                    "Create_INFO_Jira_Ticket": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Create_INFO_Jira_Ticket')",
+                                    "schema": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "string"
+                                            },
+                                            "key": {
+                                                "type": "string"
+                                            },
+                                            "self": {
+                                                "type": "string"
+                                            },
+                                            "transition": {
+                                                "properties": {
+                                                    "errorCollection": {
+                                                        "properties": {
+                                                            "errorMessages": {
+                                                                "type": "array"
+                                                            },
+                                                            "errors": {
+                                                                "properties": {},
+                                                                "type": "object"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    },
+                                                    "status": {
+                                                        "type": "integer"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            },
+                            "Add_comment_to_INFO_incident": {
+                                "runAfter": {
+                                    "Parse_\"Create_INFO_Jira_Ticket\"_Body": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azuresentinel-1']['connectionId']"
+                                        }
+                                    },
+                                    "method": "post",
+                                    "body": {
+                                        "incidentArmId": "@triggerBody()?['object']?['id']",
+                                        "message": "<p class=\"editor-paragraph\">@{body('Parse_\"Create_INFO_Jira_Ticket\"_Body')?['self']}</p>"
+                                    },
+                                    "path": "/Incidents/Comment"
+                                }
+                            },
+                            "Update_incident": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azuresentinel-1']['connectionId']"
+                                        }
+                                    },
+                                    "method": "put",
+                                    "body": {
+                                        "incidentArmId": "@triggerBody()?['object']?['id']",
+                                        "tagsToAdd": {
+                                            "TagsToAdd": []
+                                        },
+                                        "severity": "Low"
+                                    },
+                                    "path": "/Incidents"
+                                }
+                            }
+                        }
+                    }
+                },
+                "default": {
+                    "actions": {}
+                },
+                "expression": "@triggerBody()?['object']?['properties']?['severity']",
+                "type": "Switch"
+            },
+            "Get_password_of_Jira_user": {
+                "runAfter": {},
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['keyvault']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/secrets/@{encodeURIComponent(parameters('KeyVaultSecretName'))}/value"
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "outputs"
+                        ]
+                    }
+                }
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "JIRAHOST": {
+                "defaultValue": "https://trackspace.lhsystems.com",
+                "type": "String"
+            },
+            "JIRAUserName": {
+                "defaultValue": "sentinelsvc",
+                "type": "String"
+            },
+            "KeyVaultSecretName": {
+                "defaultValue": "sentinelsvc",
+                "type": "String"
+            },
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "azuresentinel": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/providers/Microsoft.Web/locations/westeurope/managedApis/azuresentinel",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/LSY-WEUR-ITCS-PRD-APICON-SENTINEL",
+                    "connectionName": "LSY-WEUR-ITCS-PRD-APICON-SENTINEL",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "azuresentinel-1": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/providers/Microsoft.Web/locations/westeurope/managedApis/azuresentinel",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/azuresentinel-ID_Okta_LHsystems",
+                    "connectionName": "azuresentinel-ID_Okta_LHsystems",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "keyvault": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/providers/Microsoft.Web/locations/westeurope/managedApis/keyvault",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/LSY-WEUR-ITCS-PRD-APICON-KV",
+                    "connectionName": "LSY-WEUR-ITCS-PRD-APICON-KV",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

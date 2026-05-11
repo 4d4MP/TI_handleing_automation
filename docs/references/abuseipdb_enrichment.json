@@ -1,0 +1,183 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Microsoft_Sentinel_incident": {
+                "type": "ApiConnectionWebhook",
+                "inputs": {
+                    "body": {
+                        "callback_url": "@{listCallbackUrl()}"
+                    },
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                        }
+                    },
+                    "path": "/incident-creation"
+                }
+            }
+        },
+        "actions": {
+            "Add_comment_to_incident_(V3)": {
+                "runAfter": {
+                    "Compose": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ApiConnection",
+                "inputs": {
+                    "body": {
+                        "incidentArmId": "@triggerBody()?['object']?['id']",
+                        "message": "<p><span style=\"font-size: 14px\"><strong></strong></span><span style=\"font-size: 14px\"><strong>@{outputs('Get_Logo')}</strong></span><span style=\"font-size: 14px\"><strong><br>\nAbuseIPDB IP Checking Results:</strong></span><br>\n@{outputs('Compose')}</p>"
+                    },
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "path": "/Incidents/Comment"
+                }
+            },
+            "Check_each_IP_in_AbuseIPDB": {
+                "foreach": "@body('Entities_-_Get_IPs')?['IPs']",
+                "actions": {
+                    "Append_Result_to_Result_List": {
+                        "runAfter": {
+                            "AuseIPDB_CHECK_Endpoint": [
+                                "Succeeded"
+                            ]
+                        },
+                        "type": "AppendToArrayVariable",
+                        "inputs": {
+                            "name": "Result List",
+                            "value": {
+                                "abuseConfidenceScore": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['abuseConfidenceScore']",
+                                "country": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['countryName']",
+                                "country code": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['countryCode']",
+                                "hostnames": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['hostnames']",
+                                "ipAddress": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['ipAddress']",
+                                "ipVersion": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['ipVersion']",
+                                "isPublic": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['isPublic']",
+                                "isWhitelisted": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['isWhitelisted']",
+                                "isp": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['isp']",
+                                "lastReportedAt": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['lastReportedAt']",
+                                "numDistinctUsers": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['numDistinctUsers']",
+                                "totalReports": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['totalReports']",
+                                "usageType": "@body('AuseIPDB_CHECK_Endpoint')?['data']?['usageType']"
+                            }
+                        }
+                    },
+                    "AuseIPDB_CHECK_Endpoint": {
+                        "runAfter": {},
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['AbuseIPDBAPI']['connectionId']"
+                                }
+                            },
+                            "method": "get",
+                            "path": "/check",
+                            "queries": {
+                                "ipAddress": "@items('Check_each_IP_in_AbuseIPDB')?['Address']"
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Initialize_Results_List": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Foreach"
+            },
+            "Compose": {
+                "runAfter": {
+                    "Create_HTML_table_with_Results": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Compose",
+                "inputs": "@body('Create_HTML_table_with_Results')"
+            },
+            "Create_HTML_table_with_Results": {
+                "runAfter": {
+                    "Check_each_IP_in_AbuseIPDB": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Table",
+                "inputs": {
+                    "format": "HTML",
+                    "from": "@variables('Result List')"
+                }
+            },
+            "Entities_-_Get_IPs": {
+                "runAfter": {},
+                "type": "ApiConnection",
+                "inputs": {
+                    "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                        }
+                    },
+                    "method": "post",
+                    "path": "/entities/ip"
+                }
+            },
+            "Get_Logo": {
+                "runAfter": {
+                    "Entities_-_Get_IPs": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Compose",
+                "inputs": "<img src=\"https://www.abuseipdb.com/img/abuseipdb.png.pagespeed.ce.CI8T6WsXU7.png\"  width=\"152\" height=\"32\"> "
+            },
+            "Initialize_Results_List": {
+                "runAfter": {
+                    "Get_Logo": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Result List",
+                            "type": "array"
+                        }
+                    ]
+                }
+            }
+        },
+        "parameters": {
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "AbuseIPDBAPI": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/customApis/AbuseIPDBAPI",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/connections/abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo",
+                    "connectionName": "abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo",
+                    "connectionProperties": {}
+                },
+                "azuresentinel": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/providers/Microsoft.Web/locations/westeurope/managedApis/azuresentinel",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/connections/azuresentinel-AbuseIPDB-EnrichIncidentByIPInfo",
+                    "connectionName": "azuresentinel-AbuseIPDB-EnrichIncidentByIPInfo",
+                    "connectionProperties": {}
+                }
+            }
+        }
+    }
+}
