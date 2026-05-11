@@ -4,7 +4,7 @@
 
 When a Sentinel incident fires and the playbook runs, the analyst will see one of three comment shapes on the incident:
 
-1. **AbuseIPDB unreachable** — health-check failed. Nothing else happened; no Jira ticket exists, blocklist is untouched. Action: check AbuseIPDB status / KV secret rotation and re-run the playbook manually on the incident.
+1. **AbuseIPDB unreachable** — health-check failed. Nothing else happened; no Jira ticket exists, blocklist is untouched. Action: check AbuseIPDB status and that the OMS connection `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` is still authorised, then re-run the playbook manually on the incident.
 2. **Playbook finished without action** — every IP either had fewer than `MinReports` AbuseIPDB reports or belonged to an excluded ISP. No Jira ticket, no blocklist change. No action needed.
 3. **Approval ticket opened** — comment contains a Trackspace URL (e.g. `https://trackspace.lhsystems.com/browse/CLOPSSEC-12345`). The playbook is now polling that ticket every 5 minutes.
 
@@ -66,6 +66,19 @@ If the playbook needs to be re-triggered on an incident (e.g. after fixing a KV 
 2. Select `Sentinel-IPAbuse-TriageAndBlock`.
 3. Note: each re-run creates a fresh Jira ticket. Close the old ticket first to avoid duplicate approvals racing.
 
+## Reconciling concurrent approvals
+
+The blob update is read-modify-write without a lease or `If-Match` precondition. If two approved playbook runs hit `Update_blob` within a few seconds of each other, the later writer can overwrite the earlier one and silently drop the earlier run's IPs.
+
+Symptoms:
+- Two incident comments within ~10s of each other both say "N new IP(s) appended", but a `grep` against `$web/index.html` only shows the second run's IPs.
+
+Recovery:
+1. Identify the affected incidents (look for two "Approval received" comments close together).
+2. Re-run the playbook on each affected incident via **Actions → Run playbook**. The line-level dedupe in the blob-update step makes re-runs idempotent — already-present IPs are skipped, missing ones are appended.
+
+To avoid this entirely, switch `Update_blob` to use the `ETag` returned by `Get_blob_content` as an `If-Match` header and wrap it in an Until-retry on 412 Precondition Failed. The current workflow deliberately skips that to stay simple; flip the trade-off here if collisions are seen in practice.
+
 ## Tuning
 
 The Logic App's parameters can be edited in the Azure portal (`Logic app → Edit → ⚙ Parameters`) without redeploying ARM:
@@ -82,8 +95,7 @@ The Logic App's parameters can be edited in the Azure portal (`Logic app → Edi
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Run history shows `Get_AbuseIPDB_key` failed with 403 | Managed identity missing `Key Vault Secrets User` | Grant the role on the KV. |
-| `AbuseIPDB_health_check` 401 | Key in KV is wrong or expired | Rotate `abuseipdb-apikey` secret. |
+| `AbuseIPDB_health_check` 401/403 | OMS AbuseIPDB connection auth expired, or the API key bound to the connection was rotated. | Contact OMS to re-authorise `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` in `LSY_WEUR_ITCS_PRD_OMS_RG_001`. |
 | `AbuseIPDB_health_check` 429 | Rate-limited | Wait it out; consider reducing playbook trigger volume or upgrading the AbuseIPDB plan. |
 | `Create_Jira_Task` 401 | Trackspace password rotated | Update `sentinelsvc` secret in KV. |
 | `Create_Jira_Task` 400 with `issuetype` error | `JiraIssueTypeName` doesn't exist in CLOPSSEC | Adjust the parameter to a valid issue-type name. |

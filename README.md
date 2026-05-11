@@ -24,9 +24,10 @@ Source of truth for the **Sentinel-IPAbuse-TriageAndBlock** playbook: a Microsof
 
 Prerequisites:
 
-- A Key Vault holding two secrets: the AbuseIPDB API key and the Trackspace service-account password.
+- A Key Vault holding one secret: the Trackspace service-account password (`JiraKeyVaultSecretName`, default `sentinelsvc`).
 - A storage account with static website enabled and `$web/index.html` present (created empty if necessary).
 - Permission to create Logic Apps + API connections in the target resource group.
+- The OMS-owned AbuseIPDB custom connection `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` in resource group `LSY_WEUR_ITCS_PRD_OMS_RG_001` must already exist and be authorised. AbuseIPDB enrichment goes through that connection — this playbook does not store an AbuseIPDB API key of its own.
 
 ```bash
 RG=LSY_WEUR_ITCS_PRD_SEC_RG_002
@@ -45,7 +46,7 @@ The deployment outputs `managedIdentityPrincipalId`. Grant it the three roles be
 | Key Vault | Key Vault Secrets User |
 | Storage account (blocklist) | Storage Blob Data Contributor |
 
-The API connections (`azuresentinel-<PlaybookName>`, `keyvault-<PlaybookName>`) are created by the template but their consent prompts must be approved in the portal on first use (open each connection → "Edit API connection" → Authorize).
+The API connections (`azuresentinel-<PlaybookName>`, `keyvault-<PlaybookName>`) are created by the template but their consent prompts must be approved in the portal on first use (open each connection → "Edit API connection" → Authorize). The third connection used by the playbook — `AbuseIPDBAPI` → `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` in `LSY_WEUR_ITCS_PRD_OMS_RG_001` — is OMS-owned and is **referenced**, not created, by this template; it should already be authorised in production.
 
 ## Configuration
 
@@ -62,9 +63,9 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 ## Workflow at a glance
 
 1. Sentinel incident trigger → `Entities - Get IPs`.
-2. Pull AbuseIPDB key + Jira password from Key Vault (`secureData` so values don't appear in run history).
-3. Health-check AbuseIPDB with `8.8.8.8`. Failure → comment + terminate.
-4. Foreach IP: HTTP `GET /api/v2/check`, append a report row, and (if `totalReports >= MinReports` and ISP is not excluded) append to `Kept_IPs`.
+2. Pull the Jira password from Key Vault (`secureData` so it doesn't appear in run history). AbuseIPDB auth is handled by the OMS-owned `AbuseIPDBAPI` connection — no secret retrieval needed.
+3. Health-check AbuseIPDB by calling `/check?ipAddress=8.8.8.8` through the `AbuseIPDBAPI` connection. Failure → comment + terminate.
+4. Foreach IP: `AbuseIPDBAPI` → `GET /check`, append a report row, and (if `totalReports >= MinReports` and ISP is not excluded) append to `Kept_IPs`.
 5. Empty list → comment "no actionable IPs" + terminate succeeded.
 6. Otherwise: build CSV, open a `Task` in `CLOPSSEC`, attach the CSV, comment the Jira URL on the incident.
 7. Poll the Jira ticket every 5 min until status (case-insensitive) equals `approval`, or timeout.

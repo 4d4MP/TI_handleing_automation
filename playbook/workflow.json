@@ -19,10 +19,6 @@
                 "type": "String",
                 "defaultValue": "sentinelsvc"
             },
-            "AbuseIPDBKeyVaultSecretName": {
-                "type": "String",
-                "defaultValue": "abuseipdb-apikey"
-            },
             "JiraProjectKey": {
                 "type": "String",
                 "defaultValue": "CLOPSSEC"
@@ -105,31 +101,6 @@
                     "path": "/entities/ip"
                 }
             },
-            "Get_AbuseIPDB_key": {
-                "runAfter": {
-                    "Entities_-_Get_IPs": [
-                        "Succeeded"
-                    ]
-                },
-                "type": "ApiConnection",
-                "inputs": {
-                    "host": {
-                        "connection": {
-                            "name": "@parameters('$connections')['keyvault']['connectionId']"
-                        }
-                    },
-                    "method": "get",
-                    "path": "/secrets/@{encodeURIComponent(parameters('AbuseIPDBKeyVaultSecretName'))}/value"
-                },
-                "runtimeConfiguration": {
-                    "secureData": {
-                        "properties": [
-                            "inputs",
-                            "outputs"
-                        ]
-                    }
-                }
-            },
             "Get_Jira_password": {
                 "runAfter": {
                     "Entities_-_Get_IPs": [
@@ -157,28 +128,22 @@
             },
             "AbuseIPDB_health_check": {
                 "runAfter": {
-                    "Get_AbuseIPDB_key": [
+                    "Entities_-_Get_IPs": [
                         "Succeeded"
                     ]
                 },
-                "type": "Http",
+                "type": "ApiConnection",
                 "inputs": {
-                    "method": "GET",
-                    "uri": "https://api.abuseipdb.com/api/v2/check",
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['AbuseIPDBAPI']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/check",
                     "queries": {
                         "ipAddress": "8.8.8.8",
                         "maxAgeInDays": "90"
-                    },
-                    "headers": {
-                        "Key": "@{body('Get_AbuseIPDB_key')?['value']}",
-                        "Accept": "application/json"
-                    }
-                },
-                "runtimeConfiguration": {
-                    "secureData": {
-                        "properties": [
-                            "inputs"
-                        ]
                     }
                 }
             },
@@ -257,27 +222,20 @@
                 "actions": {
                     "HTTP_Check_IP": {
                         "runAfter": {},
-                        "type": "Http",
+                        "type": "ApiConnection",
                         "inputs": {
-                            "method": "GET",
-                            "uri": "https://api.abuseipdb.com/api/v2/check",
-                            "queries": {
-                                "ipAddress": "@{items('Check_each_IP_in_AbuseIPDB')?['Address']}",
-                                "maxAgeInDays": "90"
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['AbuseIPDBAPI']['connectionId']"
+                                }
                             },
-                            "headers": {
-                                "Key": "@{body('Get_AbuseIPDB_key')?['value']}",
-                                "Accept": "application/json"
+                            "method": "get",
+                            "path": "/check",
+                            "queries": {
+                                "ipAddress": "@items('Check_each_IP_in_AbuseIPDB')?['Address']",
+                                "maxAgeInDays": "90"
                             }
-                        },
-                        "runtimeConfiguration": {
-                            "secureData": {
-                                "properties": [
-                                    "inputs"
-                                ]
-                            }
-                        },
-                        "operationOptions": "DisableAsyncPattern"
+                        }
                     },
                     "Append_Report_Row": {
                         "runAfter": {
@@ -661,16 +619,25 @@
                                                     "type": "Compose",
                                                     "inputs": "@{string(body('Get_blob_content'))}"
                                                 },
-                                                "Filter_Unique_New_IPs": {
+                                                "Compose_existing_lines": {
                                                     "runAfter": {
                                                         "Compose_existing_content": [
+                                                            "Succeeded"
+                                                        ]
+                                                    },
+                                                    "type": "Compose",
+                                                    "inputs": "@split(replace(outputs('Compose_existing_content'), decodeUriComponent('%0D'), ''), decodeUriComponent('%0A'))"
+                                                },
+                                                "Filter_Unique_New_IPs": {
+                                                    "runAfter": {
+                                                        "Compose_existing_lines": [
                                                             "Succeeded"
                                                         ]
                                                     },
                                                     "type": "Query",
                                                     "inputs": {
                                                         "from": "@variables('Kept_IPs')",
-                                                        "where": "@not(contains(outputs('Compose_existing_content'), item()))"
+                                                        "where": "@not(contains(outputs('Compose_existing_lines'), item()))"
                                                     }
                                                 },
                                                 "Check_anything_new_to_append": {
@@ -797,6 +764,12 @@
                             "type": "ManagedServiceIdentity"
                         }
                     }
+                },
+                "AbuseIPDBAPI": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/customApis/AbuseIPDBAPI",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/connections/abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo",
+                    "connectionName": "abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo",
+                    "connectionProperties": {}
                 }
             }
         }
