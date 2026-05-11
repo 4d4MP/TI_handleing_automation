@@ -313,6 +313,9 @@
                 "runAfter": {
                     "Check_each_IP_in_AbuseIPDB": [
                         "Succeeded"
+                    ],
+                    "Get_Jira_password": [
+                        "Succeeded"
                     ]
                 },
                 "type": "If",
