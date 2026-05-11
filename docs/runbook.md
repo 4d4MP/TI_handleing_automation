@@ -66,6 +66,19 @@ If the playbook needs to be re-triggered on an incident (e.g. after fixing a KV 
 2. Select `Sentinel-IPAbuse-TriageAndBlock`.
 3. Note: each re-run creates a fresh Jira ticket. Close the old ticket first to avoid duplicate approvals racing.
 
+## Reconciling concurrent approvals
+
+The blob update is read-modify-write without a lease or `If-Match` precondition. If two approved playbook runs hit `Update_blob` within a few seconds of each other, the later writer can overwrite the earlier one and silently drop the earlier run's IPs.
+
+Symptoms:
+- Two incident comments within ~10s of each other both say "N new IP(s) appended", but a `grep` against `$web/index.html` only shows the second run's IPs.
+
+Recovery:
+1. Identify the affected incidents (look for two "Approval received" comments close together).
+2. Re-run the playbook on each affected incident via **Actions → Run playbook**. The line-level dedupe in the blob-update step makes re-runs idempotent — already-present IPs are skipped, missing ones are appended.
+
+To avoid this entirely, switch `Update_blob` to use the `ETag` returned by `Get_blob_content` as an `If-Match` header and wrap it in an Until-retry on 412 Precondition Failed. The current workflow deliberately skips that to stay simple; flip the trade-off here if collisions are seen in practice.
+
 ## Tuning
 
 The Logic App's parameters can be edited in the Azure portal (`Logic app → Edit → ⚙ Parameters`) without redeploying ARM:

@@ -841,16 +841,25 @@
                                                                 "type": "Compose",
                                                                 "inputs": "@{string(body('Get_blob_content'))}"
                                                             },
-                                                            "Filter_Unique_New_IPs": {
+                                                            "Compose_existing_lines": {
                                                                 "runAfter": {
                                                                     "Compose_existing_content": [
+                                                                        "Succeeded"
+                                                                    ]
+                                                                },
+                                                                "type": "Compose",
+                                                                "inputs": "@split(replace(outputs('Compose_existing_content'), decodeUriComponent('%0D'), ''), decodeUriComponent('%0A'))"
+                                                            },
+                                                            "Filter_Unique_New_IPs": {
+                                                                "runAfter": {
+                                                                    "Compose_existing_lines": [
                                                                         "Succeeded"
                                                                     ]
                                                                 },
                                                                 "type": "Query",
                                                                 "inputs": {
                                                                     "from": "@variables('Kept_IPs')",
-                                                                    "where": "@not(contains(outputs('Compose_existing_content'), item()))"
+                                                                    "where": "@not(contains(outputs('Compose_existing_lines'), item()))"
                                                                 }
                                                             },
                                                             "Check_anything_new_to_append": {

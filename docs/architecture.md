@@ -103,9 +103,15 @@ Default `JiraApprovalStatusName` is `"approval"`, compared case-insensitively. T
 ## Blocklist update semantics
 
 1. `GET https://<acct>.blob.core.windows.net/$web/index.html` (managed identity).
-2. Filter `Kept_IPs` to those not already present as substrings in the existing content (cheap dedupe; sufficient because the file is newline-delimited IPs).
+2. Split the existing content on `\n` (after stripping `\r`) and filter `Kept_IPs` against the resulting array via exact-equality membership. This is line-level dedupe — `1.1.1.1` is not considered "already present" just because `1.1.1.10` appears in the file.
 3. If new IPs remain, build `<existing><\n if needed><newline-joined new>\n` and `PUT` it back as a `BlockBlob` with `x-ms-blob-content-type: text/html` (preserving the static-site MIME).
 4. If nothing new, skip the PUT but still comment on the incident.
+
+### Known race window — concurrent approvals
+
+The PUT is unconditional (no `If-Match` / blob lease). If two approved playbook runs reach the blob-update step at the same moment, both will read the same baseline, both will compute and PUT new content, and the later writer wins — the earlier writer's IPs are lost. The window is the few seconds between `Get_blob_content` and `Update_blob` per run, so collisions require analysts to approve two tickets within roughly that window.
+
+Mitigation is operational rather than in-workflow: after a burst of approvals, an analyst can re-run the playbook on each affected incident — the dedupe in step 2 means re-runs are idempotent, and any IPs lost to the race will be re-appended on the second attempt. The trade-off was taken deliberately to keep the workflow simple; if collisions are observed in practice, switch the `Update_blob` action to use an `If-Match` header (ETag from `Get_blob_content`) with a retry-on-412 Until loop.
 
 ## Decisions and trade-offs
 
