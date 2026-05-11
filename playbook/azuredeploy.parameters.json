@@ -1,0 +1,66 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "PlaybookName": {
+            "value": "Sentinel-IPAbuse-TriageAndBlock"
+        },
+        "Location": {
+            "value": "westeurope"
+        },
+        "KeyVaultName": {
+            "value": "REPLACE_ME_KEYVAULT_NAME"
+        },
+        "JIRAHOST": {
+            "value": "https://trackspace.lhsystems.com"
+        },
+        "JIRAUserName": {
+            "value": "sentinelsvc"
+        },
+        "JiraKeyVaultSecretName": {
+            "value": "sentinelsvc"
+        },
+        "AbuseIPDBKeyVaultSecretName": {
+            "value": "abuseipdb-apikey"
+        },
+        "JiraProjectKey": {
+            "value": "CLOPSSEC"
+        },
+        "JiraIssueTypeName": {
+            "value": "Task"
+        },
+        "JiraApprovalStatusName": {
+            "value": "approval"
+        },
+        "StorageAccountName": {
+            "value": "lsyweuritcsprdmspalo001"
+        },
+        "BlocklistContainer": {
+            "value": "$web"
+        },
+        "BlocklistBlobPath": {
+            "value": "index.html"
+        },
+        "MinReports": {
+            "value": 100
+        },
+        "ExcludedISPs": {
+            "value": [
+                "akamai technologies",
+                "google",
+                "palo alto networks",
+                "the shadowserver foundation",
+                "censys"
+            ]
+        },
+        "ApprovalPollIntervalMinutes": {
+            "value": 5
+        },
+        "ApprovalMaxIterations": {
+            "value": 576
+        },
+        "ApprovalTimeout": {
+            "value": "PT48H"
+        }
+    }
+}

@@ -1,0 +1,720 @@
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": {
+            "Recurrence": {
+                "recurrence": {
+                    "frequency": "Minute",
+                    "interval": 5
+                },
+                "evaluatedRecurrence": {
+                    "frequency": "Minute",
+                    "interval": 5
+                },
+                "type": "Recurrence"
+            }
+        },
+        "actions": {
+            "For_each_of_OPENNED_INCIDENTS": {
+                "foreach": "@body('Parse_GETINCIDENTs')?['value']",
+                "actions": {
+                    "Check_OPENNED_INCIDENT_has_comment": {
+                        "actions": {
+                            "For_each_of_OPENNED_INCIDENT_COMMENT": {
+                                "foreach": "@body('Parse_GETCOMMENTS')?['value']",
+                                "actions": {
+                                    "OPENNED_INCIDENT_COMMENT_has_valid_URL": {
+                                        "actions": {
+                                            "GETJIRAINCIDENT": {
+                                                "runAfter": {},
+                                                "type": "Http",
+                                                "inputs": {
+                                                    "authentication": {
+                                                        "password": "@body('Get_password_of_Jira_user')?['value']",
+                                                        "type": "Basic",
+                                                        "username": "@parameters('JIRAUserName')"
+                                                    },
+                                                    "method": "GET",
+                                                    "uri": "@{replace(replace(items('For_each_of_OPENNED_INCIDENT_COMMENT')?['properties']?['message'],'<p>',''),'</p>','')}"
+                                                }
+                                            },
+                                            "GETJIRAINCIDENT_is_closed": {
+                                                "actions": {
+                                                    "JIRA_CLOSE_Classification": {
+                                                        "runAfter": {},
+                                                        "cases": {
+                                                            "JIRA_CLOSE_BenignPositive": {
+                                                                "case": "BenignPositive",
+                                                                "actions": {
+                                                                    "Update_incident": {
+                                                                        "runAfter": {},
+                                                                        "type": "ApiConnection",
+                                                                        "inputs": {
+                                                                            "body": {
+                                                                                "classification": {
+                                                                                    "ClassificationAndReason": "BenignPositive - SuspiciousButExpected",
+                                                                                    "ClassificationReasonText": "Based on JIRA by LOGIC APP: @{body('Parse_GETJIRAINCIDENT')?['fields']?['customfield_17802']}"
+                                                                                },
+                                                                                "incidentArmId": "https://management.azure.com@{items('For_each_of_OPENNED_INCIDENTS')?['id']}",
+                                                                                "status": "Closed"
+                                                                            },
+                                                                            "host": {
+                                                                                "connection": {
+                                                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                                }
+                                                                            },
+                                                                            "method": "put",
+                                                                            "path": "/Incidents"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "JIRA_CLOSE_FalsePositive": {
+                                                                "case": "FalsePositive",
+                                                                "actions": {
+                                                                    "Update_incident_2": {
+                                                                        "runAfter": {},
+                                                                        "type": "ApiConnection",
+                                                                        "inputs": {
+                                                                            "body": {
+                                                                                "classification": {
+                                                                                    "ClassificationAndReason": "FalsePositive - InaccurateData",
+                                                                                    "ClassificationReasonText": "Based on JIRA by LOGIC APP: @{body('Parse_GETJIRAINCIDENT')?['fields']?['customfield_17802']}"
+                                                                                },
+                                                                                "incidentArmId": "https://management.azure.com@{items('For_each_of_OPENNED_INCIDENTS')?['id']}",
+                                                                                "status": "Closed"
+                                                                            },
+                                                                            "host": {
+                                                                                "connection": {
+                                                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                                }
+                                                                            },
+                                                                            "method": "put",
+                                                                            "path": "/Incidents"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "JIRA_CLOSE_TruePositive": {
+                                                                "case": "TruePositive",
+                                                                "actions": {
+                                                                    "Update_incident_3": {
+                                                                        "runAfter": {},
+                                                                        "type": "ApiConnection",
+                                                                        "inputs": {
+                                                                            "body": {
+                                                                                "classification": {
+                                                                                    "ClassificationAndReason": "TruePositive - SuspiciousActivity",
+                                                                                    "ClassificationReasonText": "Based on JIRA by LOGIC APP: @{body('Parse_GETJIRAINCIDENT')?['fields']?['customfield_17802']}"
+                                                                                },
+                                                                                "incidentArmId": "https://management.azure.com@{items('For_each_of_OPENNED_INCIDENTS')?['id']}",
+                                                                                "status": "Closed"
+                                                                            },
+                                                                            "host": {
+                                                                                "connection": {
+                                                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                                }
+                                                                            },
+                                                                            "method": "put",
+                                                                            "path": "/Incidents"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            },
+                                                            "JIRA_CLOSE_Undetermined": {
+                                                                "case": "Undetermined",
+                                                                "actions": {
+                                                                    "Update_incident_4": {
+                                                                        "runAfter": {},
+                                                                        "type": "ApiConnection",
+                                                                        "inputs": {
+                                                                            "body": {
+                                                                                "classification": {
+                                                                                    "ClassificationAndReason": "Undetermined",
+                                                                                    "ClassificationReasonText": "Based on JIRA by LOGIC APP: @{body('Parse_GETJIRAINCIDENT')?['fields']?['customfield_17802']}"
+                                                                                },
+                                                                                "incidentArmId": "https://management.azure.com@{items('For_each_of_OPENNED_INCIDENTS')?['id']}",
+                                                                                "status": "Closed"
+                                                                            },
+                                                                            "host": {
+                                                                                "connection": {
+                                                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                                }
+                                                                            },
+                                                                            "method": "put",
+                                                                            "path": "/Incidents"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "default": {
+                                                            "actions": {}
+                                                        },
+                                                        "expression": "@body('Parse_GETJIRAINCIDENT')?['fields']?['customfield_10905']?['value']",
+                                                        "type": "Switch"
+                                                    }
+                                                },
+                                                "runAfter": {
+                                                    "Parse_GETJIRAINCIDENT": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "else": {
+                                                    "actions": {
+                                                        "Compose": {
+                                                            "runAfter": {},
+                                                            "type": "Compose",
+                                                            "inputs": "The Jira issue still open: @{replace(replace(items('For_each_of_OPENNED_INCIDENT_COMMENT')?['properties']?['message'],'<p>',''),'</p>','')}"
+                                                        }
+                                                    }
+                                                },
+                                                "expression": {
+                                                    "and": [
+                                                        {
+                                                            "equals": [
+                                                                "@body('Parse_GETJIRAINCIDENT')?['fields']?['status']?['name']",
+                                                                "Closed"
+                                                            ]
+                                                        }
+                                                    ]
+                                                },
+                                                "type": "If"
+                                            },
+                                            "Parse_GETJIRAINCIDENT": {
+                                                "runAfter": {
+                                                    "GETJIRAINCIDENT": [
+                                                        "Succeeded"
+                                                    ]
+                                                },
+                                                "type": "ParseJson",
+                                                "inputs": {
+                                                    "content": "@body('GETJIRAINCIDENT')",
+                                                    "schema": {
+                                                        "properties": {
+                                                            "expand": {
+                                                                "type": [
+                                                                    "string",
+                                                                    "null"
+                                                                ]
+                                                            },
+                                                            "fields": {
+                                                                "properties": {
+                                                                    "customfield_10905": {
+                                                                        "properties": {
+                                                                            "disabled": {
+                                                                                "type": [
+                                                                                    "boolean",
+                                                                                    "null"
+                                                                                ]
+                                                                            },
+                                                                            "id": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "null"
+                                                                                ]
+                                                                            },
+                                                                            "self": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "null"
+                                                                                ]
+                                                                            },
+                                                                            "value": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "null"
+                                                                                ]
+                                                                            }
+                                                                        },
+                                                                        "type": [
+                                                                            "object",
+                                                                            "null"
+                                                                        ]
+                                                                    },
+                                                                    "customfield_17802": {
+                                                                        "type": [
+                                                                            "string",
+                                                                            "null"
+                                                                        ]
+                                                                    },
+                                                                    "status": {
+                                                                        "properties": {
+                                                                            "description": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "null"
+                                                                                ]
+                                                                            },
+                                                                            "iconUrl": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "null"
+                                                                                ]
+                                                                            },
+                                                                            "id": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "null"
+                                                                                ]
+                                                                            },
+                                                                            "name": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "null"
+                                                                                ]
+                                                                            },
+                                                                            "self": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "null"
+                                                                                ]
+                                                                            },
+                                                                            "statusCategory": {
+                                                                                "type": [
+                                                                                    "string",
+                                                                                    "object",
+                                                                                    "null"
+                                                                                ]
+                                                                            }
+                                                                        },
+                                                                        "type": [
+                                                                            "object",
+                                                                            "null"
+                                                                        ]
+                                                                    }
+                                                                },
+                                                                "type": [
+                                                                    "object"
+                                                                ]
+                                                            },
+                                                            "id": {
+                                                                "type": [
+                                                                    "string",
+                                                                    "null"
+                                                                ]
+                                                            },
+                                                            "key": {
+                                                                "type": [
+                                                                    "string",
+                                                                    "null"
+                                                                ]
+                                                            },
+                                                            "self": {
+                                                                "type": [
+                                                                    "string",
+                                                                    "null"
+                                                                ]
+                                                            }
+                                                        },
+                                                        "type": [
+                                                            "object",
+                                                            "null"
+                                                        ]
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "runAfter": {},
+                                        "else": {
+                                            "actions": {
+                                                "OPENNED_INCIDENT_COMMENT_has_valid_URL_simple_response": {
+                                                    "runAfter": {},
+                                                    "type": "Compose",
+                                                    "inputs": "The following alert's comment does not have valid URL: @{items('For_each_of_OPENNED_INCIDENTS')?['properties']?['incidentUrl']}"
+                                                }
+                                            }
+                                        },
+                                        "expression": {
+                                            "and": [
+                                                {
+                                                    "startsWith": [
+                                                        "@items('For_each_of_OPENNED_INCIDENT_COMMENT')?['properties']?['message']",
+                                                        "<p>https://"
+                                                    ]
+                                                }
+                                            ]
+                                        },
+                                        "type": "If"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Parse_GETCOMMENTS": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "Foreach"
+                            },
+                            "GETCOMMENTs": {
+                                "runAfter": {},
+                                "type": "Http",
+                                "inputs": {
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity"
+                                    },
+                                    "method": "GET",
+                                    "uri": "https://management.azure.com@{items('For_each_of_OPENNED_INCIDENTS')?['id']}/comments?api-version=2023-02-01&%24top=1&%24orderby=properties%2FcreatedTimeUtc"
+                                }
+                            },
+                            "Parse_GETCOMMENTS": {
+                                "runAfter": {
+                                    "GETCOMMENTs": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('GETCOMMENTs')",
+                                    "schema": {
+                                        "properties": {
+                                            "value": {
+                                                "items": {
+                                                    "properties": {
+                                                        "etag": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        },
+                                                        "id": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        },
+                                                        "name": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        },
+                                                        "properties": {
+                                                            "properties": {
+                                                                "author": {
+                                                                    "properties": {
+                                                                        "email": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        },
+                                                                        "name": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        },
+                                                                        "objectId": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        },
+                                                                        "userPrincipalName": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        }
+                                                                    },
+                                                                    "type": [
+                                                                        "object",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "createdTimeUtc": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "lastModifiedTimeUtc": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "message": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                }
+                                                            },
+                                                            "type": [
+                                                                "object",
+                                                                "null"
+                                                            ]
+                                                        },
+                                                        "type": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "id",
+                                                        "name",
+                                                        "type",
+                                                        "etag",
+                                                        "properties"
+                                                    ],
+                                                    "type": [
+                                                        "object",
+                                                        "null"
+                                                    ]
+                                                },
+                                                "type": "array"
+                                            }
+                                        },
+                                        "type": [
+                                            "object",
+                                            "null"
+                                        ]
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {},
+                        "else": {
+                            "actions": {
+                                "Check_OPENNED_INCIDENT_has_comment_simple_response": {
+                                    "runAfter": {},
+                                    "type": "Compose",
+                                    "inputs": "The following alert does not have comments: @{items('For_each_of_OPENNED_INCIDENTS')?['properties']?['incidentUrl']}"
+                                }
+                            }
+                        },
+                        "expression": {
+                            "and": [
+                                {
+                                    "greaterOrEquals": [
+                                        "@items('For_each_of_OPENNED_INCIDENTS')?['properties']?['additionalData']?['commentsCount']",
+                                        1
+                                    ]
+                                }
+                            ]
+                        },
+                        "type": "If"
+                    }
+                },
+                "runAfter": {
+                    "Parse_GETINCIDENTs": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Foreach"
+            },
+            "GETINCIDENTs": {
+                "runAfter": {
+                    "Get_password_of_Jira_user": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "Http",
+                "inputs": {
+                    "authentication": {
+                        "type": "ManagedServiceIdentity"
+                    },
+                    "method": "GET",
+                    "uri": "https://management.azure.com@{parameters('LogAnalyticsResourceID')}/providers/Microsoft.SecurityInsights/incidents?api-version=2023-07-01-preview&%24filter=(properties%2Fstatus%20ne%20%27Closed%27)%20%20and%20(properties%2Fseverity%20ne%20%27Informational%27)"
+                }
+            },
+            "Get_password_of_Jira_user": {
+                "runAfter": {},
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['keyvault']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/secrets/@{encodeURIComponent(parameters('KeyVaultSecretName'))}/value"
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "outputs"
+                        ]
+                    }
+                }
+            },
+            "Parse_GETINCIDENTs": {
+                "runAfter": {
+                    "GETINCIDENTs": [
+                        "Succeeded"
+                    ]
+                },
+                "type": "ParseJson",
+                "inputs": {
+                    "content": "@body('GETINCIDENTs')",
+                    "schema": {
+                        "properties": {
+                            "value": {
+                                "items": {
+                                    "properties": {
+                                        "etag": {
+                                            "type": "string"
+                                        },
+                                        "id": {
+                                            "type": "string"
+                                        },
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "properties": {
+                                            "properties": {
+                                                "additionalData": {
+                                                    "properties": {
+                                                        "alertProductNames": {
+                                                            "type": "array"
+                                                        },
+                                                        "alertsCount": {
+                                                            "type": "integer"
+                                                        },
+                                                        "bookmarksCount": {
+                                                            "type": "integer"
+                                                        },
+                                                        "commentsCount": {
+                                                            "type": "integer"
+                                                        },
+                                                        "tactics": {
+                                                            "type": "array"
+                                                        },
+                                                        "techniques": {
+                                                            "type": "array"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "createdTimeUtc": {
+                                                    "type": "string"
+                                                },
+                                                "description": {
+                                                    "type": "string"
+                                                },
+                                                "firstActivityTimeUtc": {
+                                                    "type": "string"
+                                                },
+                                                "incidentNumber": {
+                                                    "type": "integer"
+                                                },
+                                                "incidentUrl": {
+                                                    "type": "string"
+                                                },
+                                                "labels": {
+                                                    "type": "array"
+                                                },
+                                                "lastActivityTimeUtc": {
+                                                    "type": "string"
+                                                },
+                                                "lastModifiedTimeUtc": {
+                                                    "type": "string"
+                                                },
+                                                "owner": {
+                                                    "properties": {
+                                                        "assignedTo": {},
+                                                        "email": {},
+                                                        "objectId": {},
+                                                        "ownerType": {},
+                                                        "userPrincipalName": {}
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "providerIncidentId": {
+                                                    "type": "string"
+                                                },
+                                                "providerName": {
+                                                    "type": "string"
+                                                },
+                                                "relatedAnalyticRuleIds": {
+                                                    "type": "array"
+                                                },
+                                                "severity": {
+                                                    "type": "string"
+                                                },
+                                                "status": {
+                                                    "type": "string"
+                                                },
+                                                "title": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "type": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "id",
+                                        "name",
+                                        "etag",
+                                        "type",
+                                        "properties"
+                                    ],
+                                    "type": "object"
+                                },
+                                "type": "array"
+                            }
+                        },
+                        "type": "object"
+                    }
+                }
+            }
+        },
+        "outputs": {},
+        "parameters": {
+            "JIRAHOST": {
+                "defaultValue": "https://trackspace.lhsystems.com",
+                "type": "String"
+            },
+            "JIRAUserName": {
+                "defaultValue": "sentinelsvc",
+                "type": "String"
+            },
+            "KeyVaultSecretName": {
+                "defaultValue": "sentinelsvc",
+                "type": "String"
+            },
+            "LogAnalyticsResourceID": {
+                "defaultValue": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourcegroups/lsy_weur_itcs_prd_oms_rg_001/providers/microsoft.operationalinsights/workspaces/lsy-prd-oms",
+                "type": "String"
+            },
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
+    },
+    "parameters": {
+        "$connections": {
+            "type": "Object",
+            "value": {
+                "azuresentinel": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/providers/Microsoft.Web/locations/westeurope/managedApis/azuresentinel",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/LSY-WEUR-ITCS-PRD-APICON-SENTINEL",
+                    "connectionName": "LSY-WEUR-ITCS-PRD-APICON-SENTINEL",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                },
+                "keyvault": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/providers/Microsoft.Web/locations/westeurope/managedApis/keyvault",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/LSY-WEUR-ITCS-PRD-APICON-KV",
+                    "connectionName": "LSY-WEUR-ITCS-PRD-APICON-KV",
+                    "connectionProperties": {
+                        "authentication": {
+                            "type": "ManagedServiceIdentity"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
