@@ -29,8 +29,14 @@
         "JiraApprovalStatusName": {
             "value": "approval"
         },
+        "JiraApproveTransitionId": {
+            "value": "811"
+        },
+        "JiraResolveTransitionId": {
+            "value": "5"
+        },
         "JiraCloseTransitionId": {
-            "value": "31"
+            "value": "701"
         },
         "StorageAccountName": {
             "value": "lsyweuritcsprdmspalo001"

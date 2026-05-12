@@ -69,11 +69,25 @@
                 "description": "Status string (compared case-insensitively) that signals the analyst approved the blocklist push."
             }
         },
+        "JiraApproveTransitionId": {
+            "type": "string",
+            "defaultValue": "811",
+            "metadata": {
+                "description": "Numeric Jira workflow transition id used to move the approval ticket from Approval to In Progress, fired immediately after the analyst's approval and before the blocklist is touched. Verified in CLOPSSEC on 2026-05-12 as id 811 (name 'Approve')."
+            }
+        },
+        "JiraResolveTransitionId": {
+            "type": "string",
+            "defaultValue": "5",
+            "metadata": {
+                "description": "Numeric Jira workflow transition id used to move the ticket from In Progress to Resolved after the blocklist has been updated. Verified in CLOPSSEC on 2026-05-12 as id 5 (name 'Resolve issue')."
+            }
+        },
         "JiraCloseTransitionId": {
             "type": "string",
-            "defaultValue": "31",
+            "defaultValue": "701",
             "metadata": {
-                "description": "Numeric Jira workflow transition id used to auto-close the approval ticket after the blocklist is updated. Discover the correct value via GET /rest/api/2/issue/<any-key>/transitions for the CLOPSSEC workflow. Default '31' matches the stock Jira 'Done' transition; override if your workflow uses a different id."
+                "description": "Numeric Jira workflow transition id used to move the ticket from Resolved to Closed. Verified in CLOPSSEC on 2026-05-12 as id 701 (name 'Close'). Discover transition ids for other Jira workflows via GET /rest/api/2/issue/<any-key>/transitions."
             }
         },
         "StorageAccountName": {
@@ -216,6 +230,14 @@
                         "JiraApprovalStatusName": {
                             "type": "String",
                             "defaultValue": "[parameters('JiraApprovalStatusName')]"
+                        },
+                        "JiraApproveTransitionId": {
+                            "type": "String",
+                            "defaultValue": "[parameters('JiraApproveTransitionId')]"
+                        },
+                        "JiraResolveTransitionId": {
+                            "type": "String",
+                            "defaultValue": "[parameters('JiraResolveTransitionId')]"
                         },
                         "JiraCloseTransitionId": {
                             "type": "String",
@@ -995,8 +1017,49 @@
                                             "APPROVED": {
                                                 "case": "approved",
                                                 "actions": {
-                                                    "Append_IPs_to_Blocklist": {
+                                                    "Approve_Jira_Ticket": {
                                                         "runAfter": {},
+                                                        "type": "Http",
+                                                        "inputs": {
+                                                            "method": "POST",
+                                                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/transitions",
+                                                            "headers": {
+                                                                "Content-Type": "application/json"
+                                                            },
+                                                            "body": {
+                                                                "update": {
+                                                                    "comment": [
+                                                                        {
+                                                                            "add": {
+                                                                                "body": "Sentinel playbook: analyst approval received. Advancing ticket to In Progress; about to update the blocklist."
+                                                                            }
+                                                                        }
+                                                                    ]
+                                                                },
+                                                                "transition": {
+                                                                    "id": "@{parameters('JiraApproveTransitionId')}"
+                                                                }
+                                                            },
+                                                            "authentication": {
+                                                                "type": "Basic",
+                                                                "username": "@parameters('JIRAUserName')",
+                                                                "password": "@body('Get_Jira_password')?['value']"
+                                                            }
+                                                        },
+                                                        "runtimeConfiguration": {
+                                                            "secureData": {
+                                                                "properties": [
+                                                                    "inputs"
+                                                                ]
+                                                            }
+                                                        }
+                                                    },
+                                                    "Append_IPs_to_Blocklist": {
+                                                        "runAfter": {
+                                                            "Approve_Jira_Ticket": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
                                                         "type": "Scope",
                                                         "actions": {
                                                             "Get_blob_content": {
@@ -1115,7 +1178,7 @@
                                                             "path": "/Incidents/Comment"
                                                         }
                                                     },
-                                                    "Close_Jira_Ticket": {
+                                                    "Resolve_Jira_Ticket": {
                                                         "runAfter": {
                                                             "Comment_Approved_on_incident": [
                                                                 "Succeeded"
@@ -1133,11 +1196,43 @@
                                                                     "comment": [
                                                                         {
                                                                             "add": {
-                                                                                "body": "@{length(body('Filter_Unique_New_IPs'))} IPs added to blob"
+                                                                                "body": "Sentinel playbook: blocklist update complete — @{length(body('Filter_Unique_New_IPs'))} new IP(s) appended. Transitioning ticket to Resolved."
                                                                             }
                                                                         }
                                                                     ]
                                                                 },
+                                                                "transition": {
+                                                                    "id": "@{parameters('JiraResolveTransitionId')}"
+                                                                }
+                                                            },
+                                                            "authentication": {
+                                                                "type": "Basic",
+                                                                "username": "@parameters('JIRAUserName')",
+                                                                "password": "@body('Get_Jira_password')?['value']"
+                                                            }
+                                                        },
+                                                        "runtimeConfiguration": {
+                                                            "secureData": {
+                                                                "properties": [
+                                                                    "inputs"
+                                                                ]
+                                                            }
+                                                        }
+                                                    },
+                                                    "Close_Jira_Ticket": {
+                                                        "runAfter": {
+                                                            "Resolve_Jira_Ticket": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "Http",
+                                                        "inputs": {
+                                                            "method": "POST",
+                                                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/transitions",
+                                                            "headers": {
+                                                                "Content-Type": "application/json"
+                                                            },
+                                                            "body": {
                                                                 "transition": {
                                                                     "id": "@{parameters('JiraCloseTransitionId')}"
                                                                 }
@@ -1154,6 +1249,57 @@
                                                                     "inputs"
                                                                 ]
                                                             }
+                                                        }
+                                                    },
+                                                    "Comment_Approve_Failed": {
+                                                        "runAfter": {
+                                                            "Approve_Jira_Ticket": [
+                                                                "Failed",
+                                                                "TimedOut",
+                                                                "Skipped"
+                                                            ]
+                                                        },
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "body": {
+                                                                "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                                "message": "<p><strong>Approval received but ticket transition failed.</strong><br>Could not move <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a> out of Approval. <strong>The blocklist was NOT modified.</strong> Fix the ticket-side issue (permissions, workflow state) and re-run the playbook on this incident.</p>"
+                                                            },
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "post",
+                                                            "path": "/Incidents/Comment"
+                                                        }
+                                                    },
+                                                    "Comment_PostBlob_Transition_Failed": {
+                                                        "runAfter": {
+                                                            "Resolve_Jira_Ticket": [
+                                                                "Failed",
+                                                                "TimedOut",
+                                                                "Skipped"
+                                                            ],
+                                                            "Close_Jira_Ticket": [
+                                                                "Failed",
+                                                                "TimedOut",
+                                                                "Skipped"
+                                                            ]
+                                                        },
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "body": {
+                                                                "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                                "message": "<p><strong>Blocklist updated, but ticket close-out chain failed.</strong><br>Trackspace ticket <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a> may be stuck in In Progress or Resolved. Manual transition to Closed required. The IPs WERE appended to the blocklist; this failure is cosmetic.</p>"
+                                                            },
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "post",
+                                                            "path": "/Incidents/Comment"
                                                         }
                                                     }
                                                 }
