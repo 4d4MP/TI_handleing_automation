@@ -57,6 +57,7 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 | `MinReports` | `100` |
 | `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` |
 | `JiraApprovalStatusName` | `approval` (case-insensitive) |
+| `JiraCloseTransitionId` | `"31"` — Jira workflow transition id used to auto-close the approval ticket. Discover via `GET /rest/api/2/issue/<key>/transitions`. |
 | `ApprovalPollIntervalMinutes` | `5` |
 | `ApprovalTimeout` | `PT48H` |
 
@@ -64,12 +65,14 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 
 1. Sentinel incident trigger → `Entities - Get IPs`.
 2. Pull the Jira password from Key Vault (`secureData` so it doesn't appear in run history). AbuseIPDB auth is handled by the OMS-owned `AbuseIPDBAPI` connection — no secret retrieval needed.
-3. Health-check AbuseIPDB by calling `/check?ipAddress=8.8.8.8` through the `AbuseIPDBAPI` connection. Failure → comment + terminate.
-4. Foreach IP: `AbuseIPDBAPI` → `GET /check`, append a report row, and (if `totalReports >= MinReports` and ISP is not excluded) append to `Kept_IPs`.
-5. Empty list → comment "no actionable IPs" + terminate succeeded.
-6. Otherwise: build CSV, open a `Task` in `CLOPSSEC`, attach the CSV, comment the Jira URL on the incident.
-7. Poll the Jira ticket every 5 min until status (case-insensitive) equals `approval`, or timeout.
-8. On approval: GET `$web/index.html`, dedupe new IPs, PUT the updated blob; comment the result on the incident.
-9. On timeout / non-approval: comment "approval not received"; blocklist untouched.
+3. Health-check Trackspace by calling `GET {JIRAHOST}/rest/api/2/myself` with Basic auth. Failure (unreachable / bad creds) → comment "Trackspace unreachable" + terminate.
+4. Health-check AbuseIPDB by calling `/check?ipAddress=8.8.8.8` through the `AbuseIPDBAPI` connection.
+5. **AbuseIPDB failure path**: build a one-column CSV of the raw IPs (no enrichment), open a Jira `Task` whose summary starts with `MANUAL REVIEW REQUIRED`, attach the CSV, comment the Jira URL on the incident, terminate. No approval polling, no blocklist change.
+6. **AbuseIPDB success path** — Foreach IP: `AbuseIPDBAPI GET /check`, append a report row, and (if `totalReports >= MinReports` and ISP is not excluded) append to `Kept_IPs`.
+7. Empty list → comment "no actionable IPs", close the Sentinel incident as `BenignPositive - SuspiciousButExpected`, terminate succeeded.
+8. Otherwise: build CSV, open a `Task` in `CLOPSSEC`, attach the CSV, comment the Jira URL on the incident.
+9. Poll the Jira ticket every 5 min until status (case-insensitive) equals `approval`, or timeout.
+10. On approval: GET `$web/index.html` (404 tolerated → treat as empty), dedupe new IPs, PUT the updated blob (existing + new), comment the result on the incident, then auto-close the Jira ticket via `/transitions` with a `"N IPs added to blob"` comment.
+11. On timeout / non-approval: comment "approval not received"; blocklist untouched, Jira ticket left as the analyst put it.
 
 For the full picture see [`docs/architecture.md`](docs/architecture.md). For analyst-side operations see [`docs/runbook.md`](docs/runbook.md).

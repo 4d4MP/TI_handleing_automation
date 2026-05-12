@@ -23,9 +23,18 @@ Sentinel incident trigger
   ├─► Get_Jira_password           (Key Vault, secureData)
   │   (AbuseIPDB auth is bound to the OMS-owned AbuseIPDBAPI connection — no KV fetch.)
   │
+  ├─► Jira_health_check  (HTTP GET {JIRAHOST}/rest/api/2/myself, Basic auth)
+  │       │
+  │       └─(Failed/TimedOut/Skipped)─► Comment "Trackspace unreachable" + Terminate(Failed)
+  │
   ├─► AbuseIPDB_health_check (AbuseIPDBAPI GET /check?ipAddress=8.8.8.8)
   │       │
-  │       └─(Failed/TimedOut)─► Comment + Terminate(Failed)
+  │       └─(Failed/TimedOut/Skipped)─► Build_raw_IP_array (Select)
+  │                                   ├─ Build_raw_CSV (Table, one column 'ip')
+  │                                   ├─ Create_Manual_Jira_Task (summary "MANUAL REVIEW REQUIRED — …")
+  │                                   ├─ Parse → Attach_raw_CSV_to_Jira (multipart)
+  │                                   ├─ Comment "MANUAL — AbuseIPDB was unreachable" on the incident
+  │                                   └─ Terminate(Failed, code=AbuseIPDBUnreachable). No approval polling.
   │
   ├─► Initialize Kept_IPs, Report_Rows (arrays)
   │
@@ -36,7 +45,10 @@ Sentinel incident trigger
   │             └─ Append ip to Kept_IPs
   │
   └─► If length(Kept_IPs) == 0
-        ├─ True  ─► Comment "no actionable IPs" + Terminate(Succeeded)
+        ├─ True  ─► Comment "no actionable IPs"
+        │           Close_Sentinel_no_actionable (PUT /Incidents,
+        │             classification=BenignPositive - SuspiciousButExpected, status=Closed)
+        │           Terminate(Succeeded)
         └─ Else  ─► Build_CSV (Table action, format=CSV, from=Report_Rows)
                    ├─ Create_Jira_Task  (POST /rest/api/2/issue, Basic auth)
                    ├─ Attach_CSV_to_Jira (POST /rest/api/2/issue/{key}/attachments, multipart)
@@ -47,10 +59,13 @@ Sentinel incident trigger
                    │     └─ ParseJson → fields.status.name
                    └─ Switch on (approved | not_approved)
                          ├─ approved:
-                         │    ├─ GET blob $web/index.html
-                         │    ├─ Filter Kept_IPs against existing content (dedupe)
-                         │    ├─ If anything new: Compose new body + PUT blob
-                         │    └─ Comment on incident with count appended/skipped
+                         │    ├─ GET blob $web/index.html  (404 → empty string, run continues)
+                         │    ├─ Filter Kept_IPs against existing-content lines (exact match)
+                         │    ├─ If anything new: Compose new body (existing + new) + PUT blob
+                         │    ├─ Comment on incident with count appended/skipped
+                         │    └─ Close_Jira_Ticket (POST /transitions with
+                         │         transition.id=JiraCloseTransitionId and comment
+                         │         "N IPs added to blob")
                          └─ default:
                               └─ Comment "approval not received"
 ```
@@ -107,10 +122,11 @@ Default `JiraApprovalStatusName` is `"approval"`, compared case-insensitively. T
 
 ## Blocklist update semantics
 
-1. `GET https://<acct>.blob.core.windows.net/$web/index.html` (managed identity).
+1. `GET https://<acct>.blob.core.windows.net/$web/index.html` (managed identity). The dependent `Compose_existing_content` action is wired `runAfter: [Succeeded, Failed]`; if the GET fails (e.g. 404 because the blob doesn't exist yet, or any other non-200 status), the existing content is treated as the empty string and the run continues — the playbook can therefore create the blocklist on its very first approved run.
 2. Split the existing content on `\n` (after stripping `\r`) and filter `Kept_IPs` against the resulting array via exact-equality membership. This is line-level dedupe — `1.1.1.1` is not considered "already present" just because `1.1.1.10` appears in the file.
-3. If new IPs remain, build `<existing><\n if needed><newline-joined new>\n` and `PUT` it back as a `BlockBlob` with `x-ms-blob-content-type: text/html` (preserving the static-site MIME).
+3. **Read-modify-write, not overwrite.** If new IPs remain, `Compose_new_blocklist_content` builds `<existing><\n if needed><newline-joined new>\n` (literally `concat(existing, sep, new, '\n')`). The PUT replaces the blob, but the content sent is the **concatenation of the previous content plus the new lines** — no existing entries are lost. The blob is written back as a `BlockBlob` with `x-ms-blob-content-type: text/html` (preserving the static-site MIME).
 4. If nothing new, skip the PUT but still comment on the incident.
+5. After the blob is updated and the incident commented, `Close_Jira_Ticket` POSTs to `/rest/api/2/issue/{key}/transitions` with the configured `JiraCloseTransitionId` and an inline `update.comment.add.body = "<N> IPs added to blob"`. One HTTP call handles both the transition and the comment.
 
 ### Known race window — concurrent approvals
 
@@ -126,6 +142,10 @@ Mitigation is operational rather than in-workflow: after a burst of approvals, a
 - **Blob via HTTP + managed identity** rather than the Azure Blob connector to avoid the `$web`-container double-encoding gotcha in the V2 connector path.
 - **Secrets are flagged `secureData`** on the `Get_Jira_password` action (the only Key Vault retrieval left) and on the Jira HTTP calls that include the Basic auth header. AbuseIPDB has no `secureData` flag because the key never enters the workflow — it's bound to the OMS connection.
 - **Shared OMS AbuseIPDB connection** rather than a per-playbook custom connector + KV-stored key. Saves a moving part (no key to rotate, no KV access policy) and matches how the existing `abuseipdb_enrichment.json` playbook already calls AbuseIPDB. Trade-off: an OMS-side rotation, rename, or deletion of `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` will break this playbook, since the connection is referenced by absolute resource ID.
+- **Two health checks, chained in order Jira → AbuseIPDB.** Jira is checked first because the AbuseIPDB-unreachable fallback opens a manual Jira ticket; without Jira up there is no usable fallback. If Jira is down, the playbook aborts at the earliest possible point and a comment lands on the Sentinel incident.
+- **AbuseIPDB-unreachable manual ticket has no approval polling.** Once enrichment is gone there's nothing to police; pushing IPs to the blocklist without enrichment defeats the playbook's purpose. The analyst gets a ticket with the raw IP list attached and handles it by hand (or re-runs the playbook once AbuseIPDB recovers).
+- **Empty-result branch auto-closes the Sentinel incident** with classification `BenignPositive - SuspiciousButExpected`, mirroring the Sentinel close pattern in `docs/references/trackspacejira_ticket_close.json`. The incident comment explicitly names the classification so an analyst inspecting the closed incident sees the rationale.
+- **Auto-close the approval ticket** after the blob update via `POST /rest/api/2/issue/{key}/transitions`. The same call carries the `"<N> IPs added to blob"` comment as an `update.comment.add.body`, saving a second HTTP request. If `JiraCloseTransitionId` is wrong for the CLOPSSEC workflow, this action returns 400 and the run ends Failed — but the blob has already been updated, so the only consequence is an open ticket the analyst must close by hand. Failing loudly here is intentional: it surfaces the misconfiguration immediately.
 
 ## Reference workflows
 

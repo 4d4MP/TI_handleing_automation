@@ -69,6 +69,13 @@
                 "description": "Status string (compared case-insensitively) that signals the analyst approved the blocklist push."
             }
         },
+        "JiraCloseTransitionId": {
+            "type": "string",
+            "defaultValue": "31",
+            "metadata": {
+                "description": "Numeric Jira workflow transition id used to auto-close the approval ticket after the blocklist is updated. Discover the correct value via GET /rest/api/2/issue/<any-key>/transitions for the CLOPSSEC workflow. Default '31' matches the stock Jira 'Done' transition; override if your workflow uses a different id."
+            }
+        },
         "StorageAccountName": {
             "type": "string",
             "defaultValue": "lsyweuritcsprdmspalo001",
@@ -210,6 +217,10 @@
                             "type": "String",
                             "defaultValue": "[parameters('JiraApprovalStatusName')]"
                         },
+                        "JiraCloseTransitionId": {
+                            "type": "String",
+                            "defaultValue": "[parameters('JiraCloseTransitionId')]"
+                        },
                         "StorageAccountName": {
                             "type": "String",
                             "defaultValue": "[parameters('StorageAccountName')]"
@@ -299,9 +310,71 @@
                                 }
                             }
                         },
+                        "Jira_health_check": {
+                            "runAfter": {
+                                "Get_Jira_password": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "method": "GET",
+                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/myself",
+                                "authentication": {
+                                    "type": "Basic",
+                                    "username": "@parameters('JIRAUserName')",
+                                    "password": "@body('Get_Jira_password')?['value']"
+                                }
+                            },
+                            "runtimeConfiguration": {
+                                "secureData": {
+                                    "properties": [
+                                        "inputs"
+                                    ]
+                                }
+                            }
+                        },
+                        "Comment_Jira_unreachable": {
+                            "runAfter": {
+                                "Jira_health_check": [
+                                    "Failed",
+                                    "TimedOut",
+                                    "Skipped"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "body": {
+                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                    "message": "<p><strong>Trackspace (Jira) unreachable</strong><br>HTTP status: @{outputs('Jira_health_check')?['statusCode']}. The IP-abuse playbook has been aborted; no triage ticket was opened and the blocklist was not modified.</p>"
+                                },
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "path": "/Incidents/Comment"
+                            }
+                        },
+                        "Terminate_Jira_unreachable": {
+                            "runAfter": {
+                                "Comment_Jira_unreachable": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Terminate",
+                            "inputs": {
+                                "runStatus": "Failed",
+                                "runError": {
+                                    "code": "JiraUnreachable",
+                                    "message": "GET /rest/api/2/myself against the Trackspace base URL returned a non-success status during the health check."
+                                }
+                            }
+                        },
                         "AbuseIPDB_health_check": {
                             "runAfter": {
-                                "Entities_-_Get_IPs": [
+                                "Jira_health_check": [
                                     "Succeeded"
                                 ]
                             },
@@ -320,7 +393,7 @@
                                 }
                             }
                         },
-                        "Comment_AbuseIPDB_unreachable": {
+                        "Build_raw_IP_array": {
                             "runAfter": {
                                 "AbuseIPDB_health_check": [
                                     "Failed",
@@ -328,11 +401,141 @@
                                     "Skipped"
                                 ]
                             },
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@body('Entities_-_Get_IPs')?['IPs']",
+                                "select": {
+                                    "ip": "@item()?['Address']"
+                                }
+                            }
+                        },
+                        "Build_raw_CSV": {
+                            "runAfter": {
+                                "Build_raw_IP_array": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Table",
+                            "inputs": {
+                                "format": "CSV",
+                                "from": "@body('Build_raw_IP_array')"
+                            }
+                        },
+                        "Create_Manual_Jira_Task": {
+                            "runAfter": {
+                                "Build_raw_CSV": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "method": "POST",
+                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                                "headers": {
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {
+                                    "fields": {
+                                        "project": {
+                                            "key": "@{parameters('JiraProjectKey')}"
+                                        },
+                                        "issuetype": {
+                                            "name": "@{parameters('JiraIssueTypeName')}"
+                                        },
+                                        "summary": "MANUAL REVIEW REQUIRED — AbuseIPDB unreachable for Sentinel #@{triggerBody()?['object']?['properties']?['incidentNumber']}",
+                                        "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\nAbuseIPDB was unreachable during the playbook run (health check HTTP @{outputs('AbuseIPDB_health_check')?['statusCode']}). The raw IP list from the Sentinel incident is attached as a CSV WITHOUT enrichment. Analyst must triage manually — there is no totalReports / ISP / abuseConfidenceScore data available here.\n\nThe blocklist will NOT be updated automatically by this branch. Push approved IPs to lsyweuritcsprdmspalo001/$web/index.html by hand, or re-run the playbook once AbuseIPDB recovers.",
+                                        "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}"
+                                    }
+                                },
+                                "authentication": {
+                                    "type": "Basic",
+                                    "username": "@parameters('JIRAUserName')",
+                                    "password": "@body('Get_Jira_password')?['value']"
+                                }
+                            },
+                            "runtimeConfiguration": {
+                                "secureData": {
+                                    "properties": [
+                                        "inputs"
+                                    ]
+                                }
+                            }
+                        },
+                        "Parse_Create_Manual_Jira_Task_Body": {
+                            "runAfter": {
+                                "Create_Manual_Jira_Task": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ParseJson",
+                            "inputs": {
+                                "content": "@body('Create_Manual_Jira_Task')",
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {
+                                            "type": "string"
+                                        },
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "self": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "Attach_raw_CSV_to_Jira": {
+                            "runAfter": {
+                                "Parse_Create_Manual_Jira_Task_Body": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Http",
+                            "inputs": {
+                                "method": "POST",
+                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Manual_Jira_Task_Body')?['key']}/attachments",
+                                "headers": {
+                                    "X-Atlassian-Token": "no-check"
+                                },
+                                "body": {
+                                    "$content-type": "multipart/form-data",
+                                    "$multipart": [
+                                        {
+                                            "headers": {
+                                                "Content-Disposition": "form-data; name=\"file\"; filename=\"raw_ips_@{triggerBody()?['object']?['properties']?['incidentNumber']}.csv\"",
+                                                "Content-Type": "text/csv"
+                                            },
+                                            "body": "@body('Build_raw_CSV')"
+                                        }
+                                    ]
+                                },
+                                "authentication": {
+                                    "type": "Basic",
+                                    "username": "@parameters('JIRAUserName')",
+                                    "password": "@body('Get_Jira_password')?['value']"
+                                }
+                            },
+                            "runtimeConfiguration": {
+                                "secureData": {
+                                    "properties": [
+                                        "inputs"
+                                    ]
+                                }
+                            }
+                        },
+                        "Comment_Manual_Jira_URL_on_incident": {
+                            "runAfter": {
+                                "Attach_raw_CSV_to_Jira": [
+                                    "Succeeded"
+                                ]
+                            },
                             "type": "ApiConnection",
                             "inputs": {
                                 "body": {
                                     "incidentArmId": "@triggerBody()?['object']?['id']",
-                                    "message": "<p><strong>AbuseIPDB health check failed against 8.8.8.8</strong><br>HTTP status: @{outputs('AbuseIPDB_health_check')?['statusCode']}. The IP-abuse playbook has been aborted; no Jira ticket was opened and the blocklist was not modified.</p>"
+                                    "message": "<p><strong>MANUAL — AbuseIPDB was unreachable</strong><br>HTTP @{outputs('AbuseIPDB_health_check')?['statusCode']} on health check. A triage ticket has been opened with the raw IP list (no enrichment) attached: <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Manual_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Manual_Jira_Task_Body')?['key']}</a>. The blocklist will not be modified automatically — analyst must triage by hand or re-run the playbook once AbuseIPDB recovers.</p>"
                                 },
                                 "host": {
                                     "connection": {
@@ -345,7 +548,7 @@
                         },
                         "Terminate_AbuseIPDB_unreachable": {
                             "runAfter": {
-                                "Comment_AbuseIPDB_unreachable": [
+                                "Comment_Manual_Jira_URL_on_incident": [
                                     "Succeeded"
                                 ]
                             },
@@ -505,7 +708,7 @@
                                     "inputs": {
                                         "body": {
                                             "incidentArmId": "@triggerBody()?['object']?['id']",
-                                            "message": "<p><strong>IP-abuse playbook finished without action.</strong><br>After AbuseIPDB enrichment, no IPs met the threshold (totalReports &ge; @{parameters('MinReports')} and ISP not in the excluded list).</p>"
+                                            "message": "<p><strong>IP-abuse playbook finished without action.</strong><br>After AbuseIPDB enrichment, no IPs met the threshold (totalReports &ge; @{parameters('MinReports')} and ISP not in the excluded list). Closing this incident as BenignPositive - SuspiciousButExpected.</p>"
                                         },
                                         "host": {
                                             "connection": {
@@ -516,9 +719,34 @@
                                         "path": "/Incidents/Comment"
                                     }
                                 },
-                                "Terminate_No_Actionable_IPs": {
+                                "Close_Sentinel_no_actionable": {
                                     "runAfter": {
                                         "Comment_No_Actionable_IPs": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "body": {
+                                            "incidentArmId": "@triggerBody()?['object']?['id']",
+                                            "classification": {
+                                                "ClassificationAndReason": "BenignPositive - SuspiciousButExpected",
+                                                "ClassificationReasonText": "AbuseIPDB enrichment returned no actionable IPs (totalReports < @{parameters('MinReports')} or excluded ISP)."
+                                            },
+                                            "status": "Closed"
+                                        },
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "put",
+                                        "path": "/Incidents"
+                                    }
+                                },
+                                "Terminate_No_Actionable_IPs": {
+                                    "runAfter": {
+                                        "Close_Sentinel_no_actionable": [
                                             "Succeeded"
                                         ]
                                     },
@@ -789,11 +1017,12 @@
                                                             "Compose_existing_content": {
                                                                 "runAfter": {
                                                                     "Get_blob_content": [
-                                                                        "Succeeded"
+                                                                        "Succeeded",
+                                                                        "Failed"
                                                                     ]
                                                                 },
                                                                 "type": "Compose",
-                                                                "inputs": "@{string(body('Get_blob_content'))}"
+                                                                "inputs": "@if(equals(coalesce(outputs('Get_blob_content')?['statusCode'], 0), 200), string(body('Get_blob_content')), '')"
                                                             },
                                                             "Compose_existing_lines": {
                                                                 "runAfter": {
@@ -884,6 +1113,47 @@
                                                             },
                                                             "method": "post",
                                                             "path": "/Incidents/Comment"
+                                                        }
+                                                    },
+                                                    "Close_Jira_Ticket": {
+                                                        "runAfter": {
+                                                            "Comment_Approved_on_incident": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "Http",
+                                                        "inputs": {
+                                                            "method": "POST",
+                                                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/transitions",
+                                                            "headers": {
+                                                                "Content-Type": "application/json"
+                                                            },
+                                                            "body": {
+                                                                "update": {
+                                                                    "comment": [
+                                                                        {
+                                                                            "add": {
+                                                                                "body": "@{length(body('Filter_Unique_New_IPs'))} IPs added to blob"
+                                                                            }
+                                                                        }
+                                                                    ]
+                                                                },
+                                                                "transition": {
+                                                                    "id": "@{parameters('JiraCloseTransitionId')}"
+                                                                }
+                                                            },
+                                                            "authentication": {
+                                                                "type": "Basic",
+                                                                "username": "@parameters('JIRAUserName')",
+                                                                "password": "@body('Get_Jira_password')?['value']"
+                                                            }
+                                                        },
+                                                        "runtimeConfiguration": {
+                                                            "secureData": {
+                                                                "properties": [
+                                                                    "inputs"
+                                                                ]
+                                                            }
                                                         }
                                                     }
                                                 }
