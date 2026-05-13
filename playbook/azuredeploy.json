@@ -92,14 +92,17 @@
         },
         "StorageAccountName": {
             "type": "string",
-            "defaultValue": "lsyweuritcsprdmspalo001",
+            "defaultValue": "lsyweuritcststsec01",
             "metadata": {
-                "description": "Storage account hosting the blocklist."
+                "description": "Storage account hosting the blocklist. Currently pointed at the SEC test account (lsyweuritcststsec01, RG LSY_WEUR_ITCS_PRD_SEC_RG_002) for end-to-end playbook validation; flip back to lsyweuritcsprdmspalo001 once testing is complete."
             }
         },
         "BlocklistContainer": {
             "type": "string",
-            "defaultValue": "$web"
+            "defaultValue": "test",
+            "metadata": {
+                "description": "Container holding the blocklist blob. 'test' for the SEC test account; flip back to '$web' for the production palo static-site account."
+            }
         },
         "BlocklistBlobPath": {
             "type": "string",

@@ -45,11 +45,11 @@
             },
             "StorageAccountName": {
                 "type": "String",
-                "defaultValue": "lsyweuritcsprdmspalo001"
+                "defaultValue": "lsyweuritcststsec01"
             },
             "BlocklistContainer": {
                 "type": "String",
-                "defaultValue": "$web"
+                "defaultValue": "test"
             },
             "BlocklistBlobPath": {
                 "type": "String",
