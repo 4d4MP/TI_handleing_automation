@@ -1,6 +1,6 @@
 # TI_handleing_automation
 
-Source of truth for the **Sentinel-IPAbuse-TriageAndBlock** playbook: a Microsoft Sentinel Logic App that enriches incident IPs against AbuseIPDB, opens a Trackspace (Jira) approval ticket in `CLOPSSEC` with a CSV report attached, polls until the ticket is approved, and then appends the approved IPs to the static-site blocklist at `lsyweuritcsprdmspalo001/$web/index.html`.
+Source of truth for the **Sentinel-IPAbuse-TriageAndBlock** playbook: a Microsoft Sentinel Logic App that enriches incident IPs against AbuseIPDB, opens a Trackspace (Jira) approval ticket in `CLOPSSEC` with a CSV report attached, polls until the ticket is approved, and then appends the approved IPs to the static-site blocklist at `lsyweuritcststsec01/test/index.html`.
 
 ## Repository layout
 
@@ -25,7 +25,7 @@ Source of truth for the **Sentinel-IPAbuse-TriageAndBlock** playbook: a Microsof
 Prerequisites:
 
 - A Key Vault holding one secret: the Trackspace service-account password (`JiraKeyVaultSecretName`, default `sentinelsvc`).
-- A storage account with static website enabled and `$web/index.html` present (created empty if necessary).
+- A storage account with static website enabled and `test/index.html` present (created empty if necessary).
 - Permission to create Logic Apps + API connections in the target resource group.
 - The OMS-owned AbuseIPDB custom connection `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` in resource group `LSY_WEUR_ITCS_PRD_OMS_RG_001` must already exist and be authorised. AbuseIPDB enrichment goes through that connection — this playbook does not store an AbuseIPDB API key of its own.
 
@@ -72,7 +72,7 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 7. Empty list → comment "no actionable IPs", close the Sentinel incident as `BenignPositive - SuspiciousButExpected`, terminate succeeded.
 8. Otherwise: build CSV, open a `Task` in `CLOPSSEC`, attach the CSV, comment the Jira URL on the incident.
 9. Poll the Jira ticket every 5 min until status (case-insensitive) equals `approval`, or timeout.
-10. On approval: GET `$web/index.html` (404 tolerated → treat as empty), dedupe new IPs, PUT the updated blob (existing + new), comment the result on the incident, then auto-close the Jira ticket via `/transitions` with a `"N IPs added to blob"` comment.
+10. On approval: GET `test/index.html` (404 tolerated → treat as empty), dedupe new IPs, PUT the updated blob (existing + new), comment the result on the incident, then auto-close the Jira ticket via `/transitions` with a `"N IPs added to blob"` comment.
 11. On timeout / non-approval: comment "approval not received"; blocklist untouched, Jira ticket left as the analyst put it.
 
 For the full picture see [`docs/architecture.md`](docs/architecture.md). For analyst-side operations see [`docs/runbook.md`](docs/runbook.md).

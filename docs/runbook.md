@@ -5,7 +5,7 @@
 When a Sentinel incident fires and the playbook runs, the analyst will see one of five comment shapes on the incident:
 
 1. **Trackspace (Jira) unreachable** — the `Jira_health_check` to `{JIRAHOST}/rest/api/2/myself` returned non-2xx. No ticket was opened (couldn't), blocklist untouched. Action: verify Trackspace is up, that the `sentinelsvc` password hasn't been rotated in KV, and re-run the playbook on the incident.
-2. **MANUAL — AbuseIPDB was unreachable** — AbuseIPDB health check failed, so the playbook opened a Jira `Task` with the raw IP list (no enrichment) attached as `raw_ips_<incident-number>.csv`. The Jira summary starts with `MANUAL REVIEW REQUIRED`. The analyst must triage manually; **no automatic blocklist update happens from this branch**. Either push approved IPs to `$web/index.html` by hand, or re-run the playbook once AbuseIPDB is back.
+2. **MANUAL — AbuseIPDB was unreachable** — AbuseIPDB health check failed, so the playbook opened a Jira `Task` with the raw IP list (no enrichment) attached as `raw_ips_<incident-number>.csv`. The Jira summary starts with `MANUAL REVIEW REQUIRED`. The analyst must triage manually; **no automatic blocklist update happens from this branch**. Either push approved IPs to `test/index.html` by hand, or re-run the playbook once AbuseIPDB is back.
 3. **Playbook finished without action** — every IP either had fewer than `MinReports` AbuseIPDB reports or belonged to an excluded ISP. The Sentinel incident is auto-closed as `BenignPositive - SuspiciousButExpected`. No Jira ticket, no blocklist change. No action needed.
 4. **Approval ticket opened** — comment contains a Trackspace URL (e.g. `https://trackspace.lhsystems.com/browse/CLOPSSEC-12345`). The playbook is now polling that ticket every 5 minutes for the configured approval status.
 5. **Approval received** — the analyst transitioned the ticket to status `approval`; the playbook appended the surviving IPs to the blocklist and auto-closed the Jira ticket via `JiraCloseTransitionId` with a `"N IPs added to blob"` comment.
@@ -18,14 +18,14 @@ When a Sentinel incident fires and the playbook runs, the analyst will see one o
    - The ticket description lists only the **kept** IPs (those that survived filtering). Those are the ones that will hit the blocklist.
 3. Decision:
    - **Approve** → transition the ticket to status `Approval` (case-insensitive match — `approval`, `Approval`, `APPROVAL` all work).
-     - Within 5 minutes the playbook will add those IPs to `lsyweuritcsprdmspalo001/$web/index.html`, comment the result on the incident, and **auto-close the Jira ticket** (transition `JiraCloseTransitionId`, default `31`) with a `"N IPs added to blob"` comment. No further analyst action on the ticket needed.
+     - Within 5 minutes the playbook will add those IPs to `lsyweuritcststsec01/test/index.html`, comment the result on the incident, and **auto-close the Jira ticket** (transition `JiraCloseTransitionId`, default `31`) with a `"N IPs added to blob"` comment. No further analyst action on the ticket needed.
    - **Reject / close without approving** → move the ticket to any other terminal status (do not use the `Approval` status). The playbook will eventually time out (default 48 h) and add a "approval not received" comment to the incident; the blocklist will not be modified and the playbook will not touch the ticket.
 
 ## After approval
 
 The Sentinel incident gets a follow-up comment:
 
-> Approval received on CLOPSSEC-12345. N new IP(s) appended to lsyweuritcsprdmspalo001/$web/index.html; M already present and skipped.
+> Approval received on CLOPSSEC-12345. N new IP(s) appended to lsyweuritcststsec01/test/index.html; M already present and skipped.
 
 `N` may be smaller than the kept-IP count if some IPs were already in the blocklist — that's expected and not an error.
 
@@ -33,8 +33,8 @@ To confirm:
 
 ```bash
 az storage blob download \
-  --account-name lsyweuritcsprdmspalo001 \
-  --container-name '$web' \
+  --account-name lsyweuritcststsec01 \
+  --container-name 'test' \
   --name index.html \
   --auth-mode login \
   --file /tmp/blocklist.html
@@ -51,8 +51,8 @@ The playbook only appends; it never removes. To unblock an IP:
 3. Upload back:
    ```bash
    az storage blob upload \
-     --account-name lsyweuritcsprdmspalo001 \
-     --container-name '$web' \
+     --account-name lsyweuritcststsec01 \
+     --container-name 'test' \
      --name index.html \
      --auth-mode login \
      --content-type text/html \
@@ -73,7 +73,7 @@ If the playbook needs to be re-triggered on an incident (e.g. after fixing a KV 
 The blob update is read-modify-write without a lease or `If-Match` precondition. If two approved playbook runs hit `Update_blob` within a few seconds of each other, the later writer can overwrite the earlier one and silently drop the earlier run's IPs.
 
 Symptoms:
-- Two incident comments within ~10s of each other both say "N new IP(s) appended", but a `grep` against `$web/index.html` only shows the second run's IPs.
+- Two incident comments within ~10s of each other both say "N new IP(s) appended", but a `grep` against `test/index.html` only shows the second run's IPs.
 
 Recovery:
 1. Identify the affected incidents (look for two "Approval received" comments close together).

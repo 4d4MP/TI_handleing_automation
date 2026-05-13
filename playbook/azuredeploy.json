@@ -6,7 +6,7 @@
         "description": "Microsoft Sentinel playbook that triages IP entities against AbuseIPDB, opens a Trackspace (Jira) approval ticket with a CSV report, polls until the ticket reaches the configured approval status, then appends the approved IPs to a static-site blocklist blob. The Logic App's system-assigned managed identity requires: Microsoft Sentinel Responder on the workspace, Key Vault Secrets User on the Key Vault, and Storage Blob Data Contributor on the blocklist storage account.",
         "prerequisites": [
             "Key Vault secret '<JiraKeyVaultSecretName>' holding the Trackspace service account password.",
-            "Storage account hosting the blocklist with $web/index.html present (static website enabled).",
+            "Storage account hosting the blocklist with test/index.html present (static website enabled).",
             "AzureSentinel and KeyVault API connections (this template creates them if absent).",
             "OMS-owned AbuseIPDB API connection 'abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo' in resource group LSY_WEUR_ITCS_PRD_OMS_RG_001 already authorised; this template does not create or modify it."
         ],
@@ -468,7 +468,7 @@
                                             "name": "@{parameters('JiraIssueTypeName')}"
                                         },
                                         "summary": "MANUAL REVIEW REQUIRED — AbuseIPDB unreachable for Sentinel #@{triggerBody()?['object']?['properties']?['incidentNumber']}",
-                                        "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\nAbuseIPDB was unreachable during the playbook run (health check HTTP @{outputs('AbuseIPDB_health_check')?['statusCode']}). The raw IP list from the Sentinel incident is attached as a CSV WITHOUT enrichment. Analyst must triage manually — there is no totalReports / ISP / abuseConfidenceScore data available here.\n\nThe blocklist will NOT be updated automatically by this branch. Push approved IPs to lsyweuritcsprdmspalo001/$web/index.html by hand, or re-run the playbook once AbuseIPDB recovers.",
+                                        "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\nAbuseIPDB was unreachable during the playbook run (health check HTTP @{outputs('AbuseIPDB_health_check')?['statusCode']}). The raw IP list from the Sentinel incident is attached as a CSV WITHOUT enrichment. Analyst must triage manually — there is no totalReports / ISP / abuseConfidenceScore data available here.\n\nThe blocklist will NOT be updated automatically by this branch. Push approved IPs to lsyweuritcststsec01/test/index.html by hand, or re-run the playbook once AbuseIPDB recovers.",
                                         "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}"
                                     }
                                 },

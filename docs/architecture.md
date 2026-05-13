@@ -59,7 +59,7 @@ Sentinel incident trigger
                    │     └─ ParseJson → fields.status.name
                    └─ Switch on (approved | not_approved)
                          ├─ approved:
-                         │    ├─ GET blob $web/index.html  (404 → empty string, run continues)
+                         │    ├─ GET blob test/index.html  (404 → empty string, run continues)
                          │    ├─ Filter Kept_IPs against existing-content lines (exact match)
                          │    ├─ If anything new: Compose new body (existing + new) + PUT blob
                          │    ├─ Comment on incident with count appended/skipped
@@ -78,11 +78,11 @@ Sentinel incident trigger
 | `Microsoft.Web/connections` (azuresentinel) | API connection — created by this template | Sentinel incident trigger + `entities/ip` + comments. Auth: managed identity. |
 | `Microsoft.Web/connections` (keyvault) | API connection — created by this template | Reads the Jira service-account password. Auth: managed identity. |
 | `Microsoft.Web/connections/abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` | API connection — **OMS-owned, referenced not created** | Backs the `AbuseIPDBAPI` custom connector. Carries its own AbuseIPDB API key inside the connection resource. |
-| Static-site storage account | External | Hosts the blocklist blob (`$web/index.html`). |
+| Static-site storage account | External | Hosts the blocklist blob (`test/index.html`). |
 
 AbuseIPDB calls go through the OMS-owned `AbuseIPDBAPI` custom connector (cross-RG reference to `LSY_WEUR_ITCS_PRD_OMS_RG_001`). This playbook references the existing connection by resource ID; it does not create, modify, or rotate it.
 
-Blob storage is intentionally **not** behind an API connection. The Logic App calls `https://<account>.blob.core.windows.net/$web/index.html` directly using the managed identity (`audience=https://storage.azure.com/`), avoiding the connector's double-URL-encoded path for the `$web` container.
+Blob storage is intentionally **not** behind an API connection. The Logic App calls `https://<account>.blob.core.windows.net/test/index.html` directly using the managed identity (`audience=https://storage.azure.com/`), avoiding the connector's double-URL-encoded path for the `test` container.
 
 ## Required RBAC for the managed identity
 
@@ -92,7 +92,7 @@ Grant on the Logic App's system-assigned identity after first deploy (the ARM te
 |---|---|---|
 | Sentinel workspace | `Microsoft Sentinel Responder` | Read incident entities, add comments. |
 | Key Vault holding the Jira secret | `Key Vault Secrets User` | Read the Jira service-account password. (No AbuseIPDB secret in KV — the OMS connection carries its own auth.) |
-| Blocklist storage account | `Storage Blob Data Contributor` | GET + PUT on `$web/index.html`. |
+| Blocklist storage account | `Storage Blob Data Contributor` | GET + PUT on `test/index.html`. |
 
 The managed identity does **not** need any permission on the AbuseIPDB connection itself; the API key is baked into the OMS connection resource and used by the Logic Apps runtime when the action is invoked through it.
 
@@ -122,7 +122,7 @@ Default `JiraApprovalStatusName` is `"approval"`, compared case-insensitively. T
 
 ## Blocklist update semantics
 
-1. `GET https://<acct>.blob.core.windows.net/$web/index.html` (managed identity). The dependent `Compose_existing_content` action is wired `runAfter: [Succeeded, Failed]`; if the GET fails (e.g. 404 because the blob doesn't exist yet, or any other non-200 status), the existing content is treated as the empty string and the run continues — the playbook can therefore create the blocklist on its very first approved run.
+1. `GET https://<acct>.blob.core.windows.net/test/index.html` (managed identity). The dependent `Compose_existing_content` action is wired `runAfter: [Succeeded, Failed]`; if the GET fails (e.g. 404 because the blob doesn't exist yet, or any other non-200 status), the existing content is treated as the empty string and the run continues — the playbook can therefore create the blocklist on its very first approved run.
 2. Split the existing content on `\n` (after stripping `\r`) and filter `Kept_IPs` against the resulting array via exact-equality membership. This is line-level dedupe — `1.1.1.1` is not considered "already present" just because `1.1.1.10` appears in the file.
 3. **Read-modify-write, not overwrite.** If new IPs remain, `Compose_new_blocklist_content` builds `<existing><\n if needed><newline-joined new>\n` (literally `concat(existing, sep, new, '\n')`). The PUT replaces the blob, but the content sent is the **concatenation of the previous content plus the new lines** — no existing entries are lost. The blob is written back as a `BlockBlob` with `x-ms-blob-content-type: text/html` (preserving the static-site MIME).
 4. If nothing new, skip the PUT but still comment on the incident.
@@ -139,7 +139,7 @@ Mitigation is operational rather than in-workflow: after a burst of approvals, a
 - **No Function App.** Filtering is small and rare; keeping it inside the Logic App removes a deploy target. The Foreach is sequential (`concurrency.repetitions = 1`) because `AppendToArrayVariable` is not safe under parallel iterations.
 - **Two HTTP calls to AbuseIPDB per IP would be wasteful**, so the script makes one call per IP and reuses the result for both the report row and the filter decision.
 - **Multipart attachment via HTTP action.** Jira's `/attachments` endpoint requires `multipart/form-data` and `X-Atlassian-Token: no-check`; Logic Apps supports this natively via `body.$multipart`.
-- **Blob via HTTP + managed identity** rather than the Azure Blob connector to avoid the `$web`-container double-encoding gotcha in the V2 connector path.
+- **Blob via HTTP + managed identity** rather than the Azure Blob connector to avoid the `test`-container double-encoding gotcha in the V2 connector path.
 - **Secrets are flagged `secureData`** on the `Get_Jira_password` action (the only Key Vault retrieval left) and on the Jira HTTP calls that include the Basic auth header. AbuseIPDB has no `secureData` flag because the key never enters the workflow — it's bound to the OMS connection.
 - **Shared OMS AbuseIPDB connection** rather than a per-playbook custom connector + KV-stored key. Saves a moving part (no key to rotate, no KV access policy) and matches how the existing `abuseipdb_enrichment.json` playbook already calls AbuseIPDB. Trade-off: an OMS-side rotation, rename, or deletion of `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` will break this playbook, since the connection is referenced by absolute resource ID.
 - **Two health checks, chained in order Jira → AbuseIPDB.** Jira is checked first because the AbuseIPDB-unreachable fallback opens a manual Jira ticket; without Jira up there is no usable fallback. If Jira is down, the playbook aborts at the earliest possible point and a comment lands on the Sentinel incident.
