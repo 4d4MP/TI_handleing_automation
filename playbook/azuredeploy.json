@@ -62,6 +62,10 @@
             "type": "string",
             "defaultValue": "Task"
         },
+        "JiraIssueTypeId": {
+            "type": "string",
+            "defaultValue": "10"
+        },
         "JiraApprovalStatusName": {
             "type": "string",
             "defaultValue": "approval",
@@ -205,6 +209,10 @@
                         "JiraIssueTypeName": {
                             "type": "String",
                             "defaultValue": "[parameters('JiraIssueTypeName')]"
+                        },
+                        "JiraIssueTypeId": {
+                            "type": "String",
+                            "defaultValue": "[parameters('JiraIssueTypeId')]"
                         },
                         "JiraApprovalStatusName": {
                             "type": "String",
@@ -554,7 +562,7 @@
                                                         "key": "@{parameters('JiraProjectKey')}"
                                                     },
                                                     "issuetype": {
-                                                        "name": "@{parameters('JiraIssueTypeName')}"
+                                                        "id": "@{parameters('JiraIssueTypeId')}"
                                                     },
                                                     "summary": "@{triggerBody()?['object']?['properties']?['title']} — IP block approval (Sentinel #@{triggerBody()?['object']?['properties']?['incidentNumber']})",
                                                     "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\nKept IPs after AbuseIPDB filtering (totalReports >= @{parameters('MinReports')}, ISP not excluded) — @{length(variables('Kept_IPs'))} entries:\n@{join(variables('Kept_IPs'), '\n')}\n\nFull AbuseIPDB report is attached as CSV. Move this ticket to status \"@{parameters('JiraApprovalStatusName')}\" to push the IPs to the blocklist; any other terminal status leaves the blocklist unchanged.",
