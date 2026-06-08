@@ -9,7 +9,7 @@ Source of truth for the **Sentinel-IPAbuse-TriageAndBlock** playbook: a Microsof
 ├── playbook/
 │   ├── workflow.json                  # Logic App definition only (importable in the Sentinel UI)
 │   ├── azuredeploy.json               # ARM template: Logic App + API connections (preferred deploy)
-│   └── azuredeploy.parameters.json    # Placeholders — fill KeyVaultName at minimum
+│   └── azuredeploy.parameters.json    # Production values (PlaybookName=TI-handler, KeyVaultName=LSY-WEUR-ITCS-PRD-KV-02)
 ├── docs/
 │   ├── architecture.md                # Sequence, decisions, RBAC needed
 │   ├── runbook.md                     # What an analyst sees and how to approve / roll back
@@ -29,14 +29,17 @@ Prerequisites:
 - Permission to create Logic Apps + API connections in the target resource group.
 - The AbuseIPDB API connection `abuseipdbapi-1` in resource group `LSY_WEUR_ITCS_PRD_SEC_RG_002` must already exist and be authorised. It is built on the OMS-owned `abuseipdbapi` custom connector in `LSY_WEUR_ITCS_PRD_OMS_RG_001`. AbuseIPDB enrichment goes through that connection — this playbook does not store an AbuseIPDB API key of its own.
 
+`azuredeploy.parameters.json` already carries the production values — `PlaybookName=TI-handler` (the deployed Logic App) and `KeyVaultName=LSY-WEUR-ITCS-PRD-KV-02`. **Keep `PlaybookName=TI-handler`**: deploying with the old `Sentinel-IPAbuse-TriageAndBlock` name would stand up a second parallel Logic App with a fresh managed identity and leave the real TI-handler untouched. The template defaults match these values, so an override is only needed to target a different environment.
+
 ```bash
 RG=LSY_WEUR_ITCS_PRD_SEC_RG_002
 az deployment group create \
   --resource-group "$RG" \
   --template-file playbook/azuredeploy.json \
-  --parameters @playbook/azuredeploy.parameters.json \
-  --parameters KeyVaultName=<your-keyvault-name>
+  --parameters @playbook/azuredeploy.parameters.json
 ```
+
+The Logic App and both API connections carry the governance tags `CostCenter=S60019`, `Owner=lsyh.sysops@lhsystems.com`, and `assessment-id=1` in the template, matching what is live so a deploy never strips them.
 
 The deployment outputs `managedIdentityPrincipalId`. Grant it the three roles below; the playbook will not function without them:
 

@@ -3,13 +3,13 @@
     "contentVersion": "1.0.0.0",
     "parameters": {
         "PlaybookName": {
-            "value": "Sentinel-IPAbuse-TriageAndBlock"
+            "value": "TI-handler"
         },
         "Location": {
             "value": "westeurope"
         },
         "KeyVaultName": {
-            "value": "REPLACE_ME_KEYVAULT_NAME"
+            "value": "LSY-WEUR-ITCS-PRD-KV-02"
         },
         "JIRAHOST": {
             "value": "https://trackspace.lhsystems.com"
