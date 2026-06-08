@@ -1,90 +1,21 @@
 {
     "definition": {
+        "metadata": {
+            "notes": {}
+        },
         "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
         "contentVersion": "1.0.0.0",
-        "parameters": {
-            "$connections": {
-                "type": "Object",
-                "defaultValue": {}
-            },
-            "JIRAHOST": {
-                "type": "String",
-                "defaultValue": "https://trackspace.lhsystems.com"
-            },
-            "JIRAUserName": {
-                "type": "String",
-                "defaultValue": "sentinelsvc"
-            },
-            "JiraKeyVaultSecretName": {
-                "type": "String",
-                "defaultValue": "sentinelsvc"
-            },
-            "JiraProjectKey": {
-                "type": "String",
-                "defaultValue": "CLOPSSEC"
-            },
-            "JiraIssueTypeName": {
-                "type": "String",
-                "defaultValue": "Task"
-            },
-            "JiraIssueTypeId": {
-                "type": "String",
-                "defaultValue": "10"
-            },
-            "JiraApprovalStatusName": {
-                "type": "String",
-                "defaultValue": "approval"
-            },
-            "StorageAccountName": {
-                "type": "String",
-                "defaultValue": "lsyweuritcsprdmspalo001"
-            },
-            "BlocklistContainer": {
-                "type": "String",
-                "defaultValue": "$web"
-            },
-            "BlocklistBlobPath": {
-                "type": "String",
-                "defaultValue": "index.html"
-            },
-            "MinReports": {
-                "type": "Int",
-                "defaultValue": 100
-            },
-            "ExcludedISPs": {
-                "type": "Array",
-                "defaultValue": [
-                    "akamai technologies",
-                    "google",
-                    "palo alto networks",
-                    "the shadowserver foundation",
-                    "censys"
-                ]
-            },
-            "ApprovalPollIntervalMinutes": {
-                "type": "Int",
-                "defaultValue": 5
-            },
-            "ApprovalMaxIterations": {
-                "type": "Int",
-                "defaultValue": 576
-            },
-            "ApprovalTimeout": {
-                "type": "String",
-                "defaultValue": "PT48H"
-            }
-        },
         "triggers": {
             "Microsoft_Sentinel_incident": {
                 "type": "ApiConnectionWebhook",
                 "inputs": {
-                    "body": {
-                        "callback_url": "@{listCallbackUrl()}"
-                    },
                     "host": {
                         "connection": {
                             "name": "@parameters('$connections')['azuresentinel']['connectionId']"
                         }
+                    },
+                    "body": {
+                        "callback_url": "@{listCallbackUrl()}"
                     },
                     "path": "/incident-creation"
                 }
@@ -92,25 +23,20 @@
         },
         "actions": {
             "Entities_-_Get_IPs": {
-                "runAfter": {},
                 "type": "ApiConnection",
                 "inputs": {
-                    "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
                     "host": {
                         "connection": {
                             "name": "@parameters('$connections')['azuresentinel']['connectionId']"
                         }
                     },
                     "method": "post",
+                    "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
                     "path": "/entities/ip"
-                }
+                },
+                "runAfter": {}
             },
             "Get_Jira_password": {
-                "runAfter": {
-                    "Entities_-_Get_IPs": [
-                        "Succeeded"
-                    ]
-                },
                 "type": "ApiConnection",
                 "inputs": {
                     "host": {
@@ -120,6 +46,11 @@
                     },
                     "method": "get",
                     "path": "/secrets/@{encodeURIComponent(parameters('JiraKeyVaultSecretName'))}/value"
+                },
+                "runAfter": {
+                    "Entities_-_Get_IPs": [
+                        "Succeeded"
+                    ]
                 },
                 "runtimeConfiguration": {
                     "secureData": {
@@ -131,55 +62,50 @@
                 }
             },
             "AbuseIPDB_health_check": {
-                "runAfter": {
-                    "Entities_-_Get_IPs": [
-                        "Succeeded"
-                    ]
-                },
                 "type": "ApiConnection",
                 "inputs": {
                     "host": {
                         "connection": {
-                            "name": "@parameters('$connections')['AbuseIPDBAPI']['connectionId']"
+                            "name": "@parameters('$connections')['abuseipdbapi-1']['connectionId']"
                         }
                     },
                     "method": "get",
                     "path": "/check",
                     "queries": {
                         "ipAddress": "8.8.8.8",
-                        "maxAgeInDays": "90"
+                        "maxAgeInDays": 90
                     }
+                },
+                "runAfter": {
+                    "Entities_-_Get_IPs": [
+                        "Succeeded"
+                    ]
                 }
             },
             "Comment_AbuseIPDB_unreachable": {
-                "runAfter": {
-                    "AbuseIPDB_health_check": [
-                        "Failed",
-                        "TimedOut",
-                        "Skipped"
-                    ]
-                },
                 "type": "ApiConnection",
                 "inputs": {
-                    "body": {
-                        "incidentArmId": "@triggerBody()?['object']?['id']",
-                        "message": "<p><strong>AbuseIPDB health check failed against 8.8.8.8</strong><br>HTTP status: @{outputs('AbuseIPDB_health_check')?['statusCode']}. The IP-abuse playbook has been aborted; no Jira ticket was opened and the blocklist was not modified.</p>"
-                    },
                     "host": {
                         "connection": {
                             "name": "@parameters('$connections')['azuresentinel']['connectionId']"
                         }
                     },
                     "method": "post",
+                    "body": {
+                        "incidentArmId": "@triggerBody()?['object']?['id']",
+                        "message": "<p><strong>AbuseIPDB health check failed against 8.8.8.8</strong><br>HTTP status: @{outputs('AbuseIPDB_health_check')?['statusCode']}. The IP-abuse playbook has been aborted; no Jira ticket was opened and the blocklist was not modified.</p>"
+                    },
                     "path": "/Incidents/Comment"
+                },
+                "runAfter": {
+                    "AbuseIPDB_health_check": [
+                        "Failed",
+                        "TimedOut",
+                        "Skipped"
+                    ]
                 }
             },
             "Terminate_AbuseIPDB_unreachable": {
-                "runAfter": {
-                    "Comment_AbuseIPDB_unreachable": [
-                        "Succeeded"
-                    ]
-                },
                 "type": "Terminate",
                 "inputs": {
                     "runStatus": "Failed",
@@ -187,66 +113,34 @@
                         "code": "AbuseIPDBUnreachable",
                         "message": "AbuseIPDB /check returned a non-success status for 8.8.8.8 during the health check."
                     }
-                }
-            },
-            "Initialize_Kept_IPs": {
-                "runAfter": {
-                    "AbuseIPDB_health_check": [
-                        "Succeeded"
-                    ]
                 },
-                "type": "InitializeVariable",
-                "inputs": {
-                    "variables": [
-                        {
-                            "name": "Kept_IPs",
-                            "type": "Array"
-                        }
-                    ]
-                }
-            },
-            "Initialize_Report_Rows": {
                 "runAfter": {
-                    "Initialize_Kept_IPs": [
+                    "Comment_AbuseIPDB_unreachable": [
                         "Succeeded"
-                    ]
-                },
-                "type": "InitializeVariable",
-                "inputs": {
-                    "variables": [
-                        {
-                            "name": "Report_Rows",
-                            "type": "Array"
-                        }
                     ]
                 }
             },
             "Check_each_IP_in_AbuseIPDB": {
+                "type": "Foreach",
                 "foreach": "@body('Entities_-_Get_IPs')?['IPs']",
                 "actions": {
                     "HTTP_Check_IP": {
-                        "runAfter": {},
                         "type": "ApiConnection",
                         "inputs": {
                             "host": {
                                 "connection": {
-                                    "name": "@parameters('$connections')['AbuseIPDBAPI']['connectionId']"
+                                    "name": "@parameters('$connections')['abuseipdbapi-1']['connectionId']"
                                 }
                             },
                             "method": "get",
                             "path": "/check",
                             "queries": {
                                 "ipAddress": "@items('Check_each_IP_in_AbuseIPDB')?['Address']",
-                                "maxAgeInDays": "90"
+                                "maxAgeInDays": 90
                             }
                         }
                     },
                     "Append_Report_Row": {
-                        "runAfter": {
-                            "HTTP_Check_IP": [
-                                "Succeeded"
-                            ]
-                        },
                         "type": "AppendToArrayVariable",
                         "inputs": {
                             "name": "Report_Rows",
@@ -259,14 +153,14 @@
                                 "usageType": "@{coalesce(body('HTTP_Check_IP')?['data']?['usageType'], '')}",
                                 "lastReportedAt": "@{coalesce(body('HTTP_Check_IP')?['data']?['lastReportedAt'], '')}"
                             }
+                        },
+                        "runAfter": {
+                            "HTTP_Check_IP": [
+                                "Succeeded"
+                            ]
                         }
                     },
                     "Filter_Condition": {
-                        "runAfter": {
-                            "Append_Report_Row": [
-                                "Succeeded"
-                            ]
-                        },
                         "type": "If",
                         "expression": {
                             "and": [
@@ -288,7 +182,6 @@
                         },
                         "actions": {
                             "Append_to_Kept_IPs": {
-                                "runAfter": {},
                                 "type": "AppendToArrayVariable",
                                 "inputs": {
                                     "name": "Kept_IPs",
@@ -298,6 +191,11 @@
                         },
                         "else": {
                             "actions": {}
+                        },
+                        "runAfter": {
+                            "Append_Report_Row": [
+                                "Succeeded"
+                            ]
                         }
                     }
                 },
@@ -306,7 +204,6 @@
                         "Succeeded"
                     ]
                 },
-                "type": "Foreach",
                 "runtimeConfiguration": {
                     "concurrency": {
                         "repetitions": 1
@@ -314,11 +211,6 @@
                 }
             },
             "Empty_result_gate": {
-                "runAfter": {
-                    "Check_each_IP_in_AbuseIPDB": [
-                        "Succeeded"
-                    ]
-                },
                 "type": "If",
                 "expression": {
                     "equals": [
@@ -328,54 +220,47 @@
                 },
                 "actions": {
                     "Comment_No_Actionable_IPs": {
-                        "runAfter": {},
                         "type": "ApiConnection",
                         "inputs": {
-                            "body": {
-                                "incidentArmId": "@triggerBody()?['object']?['id']",
-                                "message": "<p><strong>IP-abuse playbook finished without action.</strong><br>After AbuseIPDB enrichment, no IPs met the threshold (totalReports &ge; @{parameters('MinReports')} and ISP not in the excluded list).</p>"
-                            },
                             "host": {
                                 "connection": {
                                     "name": "@parameters('$connections')['azuresentinel']['connectionId']"
                                 }
                             },
                             "method": "post",
+                            "body": {
+                                "incidentArmId": "@triggerBody()?['object']?['id']",
+                                "message": "<p><strong>IP-abuse playbook finished without action.</strong><br>After AbuseIPDB enrichment, no IPs met the threshold (totalReports &ge; @{parameters('MinReports')} and ISP not in the excluded list).</p>"
+                            },
                             "path": "/Incidents/Comment"
                         }
                     },
                     "Terminate_No_Actionable_IPs": {
+                        "type": "Terminate",
+                        "inputs": {
+                            "runStatus": "Succeeded"
+                        },
                         "runAfter": {
                             "Comment_No_Actionable_IPs": [
                                 "Succeeded"
                             ]
-                        },
-                        "type": "Terminate",
-                        "inputs": {
-                            "runStatus": "Succeeded"
                         }
                     }
                 },
                 "else": {
                     "actions": {
                         "Build_CSV": {
-                            "runAfter": {},
                             "type": "Table",
                             "inputs": {
-                                "format": "CSV",
-                                "from": "@variables('Report_Rows')"
+                                "from": "@variables('Report_Rows')",
+                                "format": "CSV"
                             }
                         },
                         "Create_Jira_Task": {
-                            "runAfter": {
-                                "Build_CSV": [
-                                    "Succeeded"
-                                ]
-                            },
                             "type": "Http",
                             "inputs": {
-                                "method": "POST",
                                 "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                                "method": "POST",
                                 "headers": {
                                     "Content-Type": "application/json"
                                 },
@@ -398,6 +283,11 @@
                                     "password": "@body('Get_Jira_password')?['value']"
                                 }
                             },
+                            "runAfter": {
+                                "Build_CSV": [
+                                    "Succeeded"
+                                ]
+                            },
                             "runtimeConfiguration": {
                                 "secureData": {
                                     "properties": [
@@ -407,11 +297,6 @@
                             }
                         },
                         "Parse_Create_Jira_Task_Body": {
-                            "runAfter": {
-                                "Create_Jira_Task": [
-                                    "Succeeded"
-                                ]
-                            },
                             "type": "ParseJson",
                             "inputs": {
                                 "content": "@body('Create_Jira_Task')",
@@ -429,18 +314,18 @@
                                         }
                                     }
                                 }
+                            },
+                            "runAfter": {
+                                "Create_Jira_Task": [
+                                    "Succeeded"
+                                ]
                             }
                         },
                         "Attach_CSV_to_Jira": {
-                            "runAfter": {
-                                "Parse_Create_Jira_Task_Body": [
-                                    "Succeeded"
-                                ]
-                            },
                             "type": "Http",
                             "inputs": {
-                                "method": "POST",
                                 "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/attachments",
+                                "method": "POST",
                                 "headers": {
                                     "X-Atlassian-Token": "no-check"
                                 },
@@ -462,6 +347,11 @@
                                     "password": "@body('Get_Jira_password')?['value']"
                                 }
                             },
+                            "runAfter": {
+                                "Parse_Create_Jira_Task_Body": [
+                                    "Succeeded"
+                                ]
+                            },
                             "runtimeConfiguration": {
                                 "secureData": {
                                     "properties": [
@@ -471,41 +361,35 @@
                             }
                         },
                         "Comment_Jira_URL_on_incident": {
-                            "runAfter": {
-                                "Attach_CSV_to_Jira": [
-                                    "Succeeded"
-                                ]
-                            },
                             "type": "ApiConnection",
                             "inputs": {
-                                "body": {
-                                    "incidentArmId": "@triggerBody()?['object']?['id']",
-                                    "message": "<p><strong>IP-abuse playbook — approval ticket opened</strong><br>Trackspace: <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a><br>@{length(variables('Kept_IPs'))} IPs await analyst approval. The playbook will poll Jira every @{parameters('ApprovalPollIntervalMinutes')} minutes for up to @{parameters('ApprovalTimeout')}.</p>"
-                                },
                                 "host": {
                                     "connection": {
                                         "name": "@parameters('$connections')['azuresentinel']['connectionId']"
                                     }
                                 },
                                 "method": "post",
+                                "body": {
+                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                    "message": "<p><strong>IP-abuse playbook — approval ticket opened</strong><br>Trackspace: <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a><br>@{length(variables('Kept_IPs'))} IPs await analyst approval. The playbook will poll Jira every @{parameters('ApprovalPollIntervalMinutes')} minutes for up to @{parameters('ApprovalTimeout')}.</p>"
+                                },
                                 "path": "/Incidents/Comment"
+                            },
+                            "runAfter": {
+                                "Attach_CSV_to_Jira": [
+                                    "Succeeded"
+                                ]
                             }
                         },
                         "Wait_For_Approval": {
-                            "runAfter": {
-                                "Comment_Jira_URL_on_incident": [
-                                    "Succeeded"
-                                ]
-                            },
                             "type": "Until",
-                            "expression": "@equals(toLower(coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], '')), toLower(parameters('JiraApprovalStatusName')))",
+                            "expression": "@contains(toLower(coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], '')), toLower(parameters('JiraApprovalStatusName')))",
                             "limit": {
                                 "count": "@parameters('ApprovalMaxIterations')",
                                 "timeout": "@parameters('ApprovalTimeout')"
                             },
                             "actions": {
                                 "Delay_Between_Polls": {
-                                    "runAfter": {},
                                     "type": "Wait",
                                     "inputs": {
                                         "interval": {
@@ -515,15 +399,10 @@
                                     }
                                 },
                                 "HTTP_Get_Jira_Issue": {
-                                    "runAfter": {
-                                        "Delay_Between_Polls": [
-                                            "Succeeded"
-                                        ]
-                                    },
                                     "type": "Http",
                                     "inputs": {
-                                        "method": "GET",
                                         "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}",
+                                        "method": "GET",
                                         "queries": {
                                             "fields": "status"
                                         },
@@ -532,6 +411,11 @@
                                             "username": "@parameters('JIRAUserName')",
                                             "password": "@body('Get_Jira_password')?['value']"
                                         }
+                                    },
+                                    "runAfter": {
+                                        "Delay_Between_Polls": [
+                                            "Succeeded"
+                                        ]
                                     },
                                     "runtimeConfiguration": {
                                         "secureData": {
@@ -542,11 +426,6 @@
                                     }
                                 },
                                 "Parse_Jira_Status": {
-                                    "runAfter": {
-                                        "HTTP_Get_Jira_Issue": [
-                                            "Succeeded"
-                                        ]
-                                    },
                                     "type": "ParseJson",
                                     "inputs": {
                                         "content": "@body('HTTP_Get_Jira_Issue')",
@@ -577,34 +456,54 @@
                                                 }
                                             }
                                         }
+                                    },
+                                    "runAfter": {
+                                        "HTTP_Get_Jira_Issue": [
+                                            "Succeeded"
+                                        ]
                                     }
                                 }
+                            },
+                            "runAfter": {
+                                "Comment_Jira_URL_on_incident": [
+                                    "Succeeded"
+                                ]
                             }
                         },
                         "Final_Switch": {
-                            "runAfter": {
-                                "Wait_For_Approval": [
-                                    "Succeeded",
-                                    "Failed",
-                                    "TimedOut"
-                                ]
-                            },
                             "type": "Switch",
                             "expression": "@if(equals(toLower(coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], '')), toLower(parameters('JiraApprovalStatusName'))), 'approved', 'not_approved')",
+                            "default": {
+                                "actions": {
+                                    "Comment_Not_Approved_on_incident": {
+                                        "type": "ApiConnection",
+                                        "inputs": {
+                                            "host": {
+                                                "connection": {
+                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                }
+                                            },
+                                            "method": "post",
+                                            "body": {
+                                                "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                "message": "<p><strong>Approval not received</strong> for <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a>.<br>Last observed Jira status: <code>@{coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], 'unknown / timeout')}</code>. The blocklist was not modified.</p>"
+                                            },
+                                            "path": "/Incidents/Comment"
+                                        }
+                                    }
+                                }
+                            },
                             "cases": {
                                 "APPROVED": {
-                                    "case": "approved",
                                     "actions": {
                                         "Append_IPs_to_Blocklist": {
-                                            "runAfter": {},
                                             "type": "Scope",
                                             "actions": {
                                                 "Get_blob_content": {
-                                                    "runAfter": {},
                                                     "type": "Http",
                                                     "inputs": {
-                                                        "method": "GET",
                                                         "uri": "https://@{parameters('StorageAccountName')}.blob.core.windows.net/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}",
+                                                        "method": "GET",
                                                         "headers": {
                                                             "x-ms-version": "2021-12-02"
                                                         },
@@ -615,41 +514,36 @@
                                                     }
                                                 },
                                                 "Compose_existing_content": {
+                                                    "type": "Compose",
+                                                    "inputs": "@{string(body('Get_blob_content'))}",
                                                     "runAfter": {
                                                         "Get_blob_content": [
                                                             "Succeeded"
                                                         ]
-                                                    },
-                                                    "type": "Compose",
-                                                    "inputs": "@{string(body('Get_blob_content'))}"
+                                                    }
                                                 },
                                                 "Compose_existing_lines": {
+                                                    "type": "Compose",
+                                                    "inputs": "@split(replace(outputs('Compose_existing_content'), decodeUriComponent('%0D'), ''), decodeUriComponent('%0A'))",
                                                     "runAfter": {
                                                         "Compose_existing_content": [
                                                             "Succeeded"
                                                         ]
-                                                    },
-                                                    "type": "Compose",
-                                                    "inputs": "@split(replace(outputs('Compose_existing_content'), decodeUriComponent('%0D'), ''), decodeUriComponent('%0A'))"
+                                                    }
                                                 },
                                                 "Filter_Unique_New_IPs": {
-                                                    "runAfter": {
-                                                        "Compose_existing_lines": [
-                                                            "Succeeded"
-                                                        ]
-                                                    },
                                                     "type": "Query",
                                                     "inputs": {
                                                         "from": "@variables('Kept_IPs')",
                                                         "where": "@not(contains(outputs('Compose_existing_lines'), item()))"
+                                                    },
+                                                    "runAfter": {
+                                                        "Compose_existing_lines": [
+                                                            "Succeeded"
+                                                        ]
                                                     }
                                                 },
                                                 "Check_anything_new_to_append": {
-                                                    "runAfter": {
-                                                        "Filter_Unique_New_IPs": [
-                                                            "Succeeded"
-                                                        ]
-                                                    },
                                                     "type": "If",
                                                     "expression": {
                                                         "greater": [
@@ -659,20 +553,14 @@
                                                     },
                                                     "actions": {
                                                         "Compose_new_blocklist_content": {
-                                                            "runAfter": {},
                                                             "type": "Compose",
                                                             "inputs": "@{concat(outputs('Compose_existing_content'), if(or(equals(outputs('Compose_existing_content'), ''), endsWith(outputs('Compose_existing_content'), '\n')), '', '\n'), join(body('Filter_Unique_New_IPs'), '\n'), '\n')}"
                                                         },
                                                         "Update_blob": {
-                                                            "runAfter": {
-                                                                "Compose_new_blocklist_content": [
-                                                                    "Succeeded"
-                                                                ]
-                                                            },
                                                             "type": "Http",
                                                             "inputs": {
-                                                                "method": "PUT",
                                                                 "uri": "https://@{parameters('StorageAccountName')}.blob.core.windows.net/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}",
+                                                                "method": "PUT",
                                                                 "headers": {
                                                                     "x-ms-version": "2021-12-02",
                                                                     "x-ms-blob-type": "BlockBlob",
@@ -684,66 +572,163 @@
                                                                     "type": "ManagedServiceIdentity",
                                                                     "audience": "https://storage.azure.com/"
                                                                 }
+                                                            },
+                                                            "runAfter": {
+                                                                "Compose_new_blocklist_content": [
+                                                                    "Succeeded"
+                                                                ]
                                                             }
                                                         }
                                                     },
                                                     "else": {
                                                         "actions": {}
+                                                    },
+                                                    "runAfter": {
+                                                        "Filter_Unique_New_IPs": [
+                                                            "Succeeded"
+                                                        ]
                                                     }
                                                 }
                                             }
                                         },
                                         "Comment_Approved_on_incident": {
-                                            "runAfter": {
-                                                "Append_IPs_to_Blocklist": [
-                                                    "Succeeded"
-                                                ]
-                                            },
                                             "type": "ApiConnection",
                                             "inputs": {
-                                                "body": {
-                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
-                                                    "message": "<p><strong>Approval received</strong> on <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a>. <br>@{length(body('Filter_Unique_New_IPs'))} new IP(s) appended to <code>@{parameters('StorageAccountName')}/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}</code>; @{sub(length(variables('Kept_IPs')), length(body('Filter_Unique_New_IPs')))} already present and skipped.</p>"
-                                                },
                                                 "host": {
                                                     "connection": {
                                                         "name": "@parameters('$connections')['azuresentinel']['connectionId']"
                                                     }
                                                 },
                                                 "method": "post",
+                                                "body": {
+                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                    "message": "<p><strong>Approval received</strong> on <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a>. <br>@{length(body('Filter_Unique_New_IPs'))} new IP(s) appended to <code>@{parameters('StorageAccountName')}/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}</code>; @{sub(length(variables('Kept_IPs')), length(body('Filter_Unique_New_IPs')))} already present and skipped.</p>"
+                                                },
                                                 "path": "/Incidents/Comment"
+                                            },
+                                            "runAfter": {
+                                                "Append_IPs_to_Blocklist": [
+                                                    "Succeeded"
+                                                ]
                                             }
                                         }
-                                    }
+                                    },
+                                    "case": "approved"
                                 }
                             },
-                            "default": {
-                                "actions": {
-                                    "Comment_Not_Approved_on_incident": {
-                                        "runAfter": {},
-                                        "type": "ApiConnection",
-                                        "inputs": {
-                                            "body": {
-                                                "incidentArmId": "@triggerBody()?['object']?['id']",
-                                                "message": "<p><strong>Approval not received</strong> for <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a>.<br>Last observed Jira status: <code>@{coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], 'unknown / timeout')}</code>. The blocklist was not modified.</p>"
-                                            },
-                                            "host": {
-                                                "connection": {
-                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                                }
-                                            },
-                                            "method": "post",
-                                            "path": "/Incidents/Comment"
-                                        }
-                                    }
-                                }
+                            "runAfter": {
+                                "Wait_For_Approval": [
+                                    "Succeeded",
+                                    "Failed",
+                                    "TimedOut"
+                                ]
                             }
                         }
                     }
+                },
+                "runAfter": {
+                    "Check_each_IP_in_AbuseIPDB": [
+                        "Succeeded"
+                    ],
+                    "Get_Jira_password": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Initialize_Report_Rows": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Kept_IPs",
+                            "type": "Array"
+                        },
+                        {
+                            "name": "Report_Rows",
+                            "type": "Array"
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "AbuseIPDB_health_check": [
+                        "Succeeded"
+                    ]
                 }
             }
         },
-        "outputs": {}
+        "outputs": {},
+        "parameters": {
+            "JIRAHOST": {
+                "defaultValue": "https://trackspace.lhsystems.com",
+                "type": "String"
+            },
+            "JIRAUserName": {
+                "defaultValue": "sentinelsvc",
+                "type": "String"
+            },
+            "JiraKeyVaultSecretName": {
+                "defaultValue": "sentinelsvc",
+                "type": "String"
+            },
+            "JiraProjectKey": {
+                "defaultValue": "CLOPSSEC",
+                "type": "String"
+            },
+            "JiraIssueTypeName": {
+                "defaultValue": "Task",
+                "type": "String"
+            },
+            "JiraIssueTypeId": {
+                "defaultValue": "10",
+                "type": "String"
+            },
+            "JiraApprovalStatusName": {
+                "defaultValue": "Resolved",
+                "type": "String"
+            },
+            "StorageAccountName": {
+                "defaultValue": "lsyweuritcsprdmspalo001",
+                "type": "String"
+            },
+            "BlocklistContainer": {
+                "defaultValue": "$web",
+                "type": "String"
+            },
+            "BlocklistBlobPath": {
+                "defaultValue": "index.html",
+                "type": "String"
+            },
+            "MinReports": {
+                "defaultValue": 100,
+                "type": "Int"
+            },
+            "ExcludedISPs": {
+                "defaultValue": [
+                    "akamai technologies",
+                    "google",
+                    "palo alto networks",
+                    "the shadowserver foundation",
+                    "censys"
+                ],
+                "type": "Array"
+            },
+            "ApprovalPollIntervalMinutes": {
+                "defaultValue": 5,
+                "type": "Int"
+            },
+            "ApprovalMaxIterations": {
+                "defaultValue": 576,
+                "type": "Int"
+            },
+            "ApprovalTimeout": {
+                "defaultValue": "PT48H",
+                "type": "String"
+            },
+            "$connections": {
+                "type": "Object",
+                "defaultValue": {}
+            }
+        }
     },
     "parameters": {
         "$connections": {
@@ -751,8 +736,8 @@
             "value": {
                 "azuresentinel": {
                     "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/providers/Microsoft.Web/locations/westeurope/managedApis/azuresentinel",
-                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/LSY-WEUR-ITCS-PRD-APICON-SENTINEL",
-                    "connectionName": "LSY-WEUR-ITCS-PRD-APICON-SENTINEL",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/azuresentinel-TI-handler",
+                    "connectionName": "azuresentinel-TI-handler",
                     "connectionProperties": {
                         "authentication": {
                             "type": "ManagedServiceIdentity"
@@ -761,18 +746,18 @@
                 },
                 "keyvault": {
                     "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/providers/Microsoft.Web/locations/westeurope/managedApis/keyvault",
-                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/LSY-WEUR-ITCS-PRD-APICON-KV",
-                    "connectionName": "LSY-WEUR-ITCS-PRD-APICON-KV",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/keyvault-TI-handler",
+                    "connectionName": "keyvault-TI-handler",
                     "connectionProperties": {
                         "authentication": {
                             "type": "ManagedServiceIdentity"
                         }
                     }
                 },
-                "AbuseIPDBAPI": {
-                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/customApis/AbuseIPDBAPI",
-                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/connections/abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo",
-                    "connectionName": "abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo",
+                "abuseipdbapi-1": {
+                    "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/lsy_weur_itcs_prd_oms_rg_001/providers/Microsoft.Web/customApis/abuseipdbapi",
+                    "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/abuseipdbapi-1",
+                    "connectionName": "abuseipdbapi-1",
                     "connectionProperties": {}
                 }
             }

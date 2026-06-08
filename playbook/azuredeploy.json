@@ -68,9 +68,9 @@
         },
         "JiraApprovalStatusName": {
             "type": "string",
-            "defaultValue": "approval",
+            "defaultValue": "Resolved",
             "metadata": {
-                "description": "Status string (compared case-insensitively) that signals the analyst approved the blocklist push."
+                "description": "Status string (matched case-insensitively as a substring of the Jira status) that signals the analyst approved the blocklist push."
             }
         },
         "StorageAccountName": {
@@ -183,6 +183,9 @@
             "properties": {
                 "state": "Enabled",
                 "definition": {
+                    "metadata": {
+                        "notes": {}
+                    },
                     "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
                     "contentVersion": "1.0.0.0",
                     "parameters": {
@@ -317,14 +320,14 @@
                             "inputs": {
                                 "host": {
                                     "connection": {
-                                        "name": "@parameters('$connections')['AbuseIPDBAPI']['connectionId']"
+                                        "name": "@parameters('$connections')['abuseipdbapi-1']['connectionId']"
                                     }
                                 },
                                 "method": "get",
                                 "path": "/check",
                                 "queries": {
                                     "ipAddress": "8.8.8.8",
-                                    "maxAgeInDays": "90"
+                                    "maxAgeInDays": 90
                                 }
                             }
                         },
@@ -366,7 +369,7 @@
                                 }
                             }
                         },
-                        "Initialize_Kept_IPs": {
+                        "Initialize_Report_Rows": {
                             "runAfter": {
                                 "AbuseIPDB_health_check": [
                                     "Succeeded"
@@ -378,19 +381,7 @@
                                     {
                                         "name": "Kept_IPs",
                                         "type": "Array"
-                                    }
-                                ]
-                            }
-                        },
-                        "Initialize_Report_Rows": {
-                            "runAfter": {
-                                "Initialize_Kept_IPs": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "InitializeVariable",
-                            "inputs": {
-                                "variables": [
+                                    },
                                     {
                                         "name": "Report_Rows",
                                         "type": "Array"
@@ -407,14 +398,14 @@
                                     "inputs": {
                                         "host": {
                                             "connection": {
-                                                "name": "@parameters('$connections')['AbuseIPDBAPI']['connectionId']"
+                                                "name": "@parameters('$connections')['abuseipdbapi-1']['connectionId']"
                                             }
                                         },
                                         "method": "get",
                                         "path": "/check",
                                         "queries": {
                                             "ipAddress": "@items('Check_each_IP_in_AbuseIPDB')?['Address']",
-                                            "maxAgeInDays": "90"
+                                            "maxAgeInDays": 90
                                         }
                                     }
                                 },
@@ -493,6 +484,9 @@
                         "Empty_result_gate": {
                             "runAfter": {
                                 "Check_each_IP_in_AbuseIPDB": [
+                                    "Succeeded"
+                                ],
+                                "Get_Jira_password": [
                                     "Succeeded"
                                 ]
                             },
@@ -675,7 +669,7 @@
                                             ]
                                         },
                                         "type": "Until",
-                                        "expression": "@equals(toLower(coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], '')), toLower(parameters('JiraApprovalStatusName')))",
+                                        "expression": "@contains(toLower(coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], '')), toLower(parameters('JiraApprovalStatusName')))",
                                         "limit": {
                                             "count": "@parameters('ApprovalMaxIterations')",
                                             "timeout": "@parameters('ApprovalTimeout')"
@@ -945,10 +939,10 @@
                                     }
                                 }
                             },
-                            "AbuseIPDBAPI": {
-                                "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/customApis/AbuseIPDBAPI",
-                                "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_OMS_RG_001/providers/Microsoft.Web/connections/abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo",
-                                "connectionName": "abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo",
+                            "abuseipdbapi-1": {
+                                "id": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/lsy_weur_itcs_prd_oms_rg_001/providers/Microsoft.Web/customApis/abuseipdbapi",
+                                "connectionId": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourceGroups/LSY_WEUR_ITCS_PRD_SEC_RG_002/providers/Microsoft.Web/connections/abuseipdbapi-1",
+                                "connectionName": "abuseipdbapi-1",
                                 "connectionProperties": {}
                             }
                         }
