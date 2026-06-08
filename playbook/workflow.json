@@ -273,7 +273,7 @@
                                             "id": "@{parameters('JiraIssueTypeId')}"
                                         },
                                         "summary": "@{triggerBody()?['object']?['properties']?['title']} — IP block approval (Sentinel #@{triggerBody()?['object']?['properties']?['incidentNumber']})",
-                                        "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\nKept IPs after AbuseIPDB filtering (totalReports >= @{parameters('MinReports')}, ISP not excluded) — @{length(variables('Kept_IPs'))} entries:\n@{join(variables('Kept_IPs'), '\n')}\n\nFull AbuseIPDB report is attached as CSV. Move this ticket to status \"@{parameters('JiraApprovalStatusName')}\" to push the IPs to the blocklist; any other terminal status leaves the blocklist unchanged.",
+                                        "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\n@{length(variables('Kept_IPs'))} IP(s) passed AbuseIPDB filtering (totalReports >= @{parameters('MinReports')}, ISP not excluded). The full AbuseIPDB report — including every IP and its scores — is attached as CSV.\n\nMove this ticket to status \"@{parameters('JiraApprovalStatusName')}\" to push the IPs to the blocklist; any other terminal status leaves the blocklist unchanged.",
                                         "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}"
                                     }
                                 },
@@ -475,20 +475,29 @@
                             "expression": "@if(equals(toLower(coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], '')), toLower(parameters('JiraApprovalStatusName'))), 'approved', 'not_approved')",
                             "default": {
                                 "actions": {
-                                    "Comment_Not_Approved_on_incident": {
-                                        "type": "ApiConnection",
+                                    "Comment_Not_Approved_on_Jira": {
+                                        "type": "Http",
                                         "inputs": {
-                                            "host": {
-                                                "connection": {
-                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                                }
+                                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/comment",
+                                            "method": "POST",
+                                            "headers": {
+                                                "Content-Type": "application/json"
                                             },
-                                            "method": "post",
                                             "body": {
-                                                "incidentArmId": "@triggerBody()?['object']?['id']",
-                                                "message": "<p><strong>Approval not received</strong> for <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a>.<br>Last observed Jira status: <code>@{coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], 'unknown / timeout')}</code>. The blocklist was not modified.</p>"
+                                                "body": "Approval not received. Last observed Jira status: @{coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], 'unknown / timeout')}. The blocklist was not modified."
                                             },
-                                            "path": "/Incidents/Comment"
+                                            "authentication": {
+                                                "type": "Basic",
+                                                "username": "@parameters('JIRAUserName')",
+                                                "password": "@body('Get_Jira_password')?['value']"
+                                            }
+                                        },
+                                        "runtimeConfiguration": {
+                                            "secureData": {
+                                                "properties": [
+                                                    "inputs"
+                                                ]
+                                            }
                                         }
                                     }
                                 }
@@ -591,25 +600,34 @@
                                                 }
                                             }
                                         },
-                                        "Comment_Approved_on_incident": {
-                                            "type": "ApiConnection",
+                                        "Comment_Approved_on_Jira": {
+                                            "type": "Http",
                                             "inputs": {
-                                                "host": {
-                                                    "connection": {
-                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                                    }
+                                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/comment",
+                                                "method": "POST",
+                                                "headers": {
+                                                    "Content-Type": "application/json"
                                                 },
-                                                "method": "post",
                                                 "body": {
-                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
-                                                    "message": "<p><strong>Approval received</strong> on <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a>. <br>@{length(body('Filter_Unique_New_IPs'))} new IP(s) appended to <code>@{parameters('StorageAccountName')}/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}</code>; @{sub(length(variables('Kept_IPs')), length(body('Filter_Unique_New_IPs')))} already present and skipped.</p>"
+                                                    "body": "Approval received. @{length(body('Filter_Unique_New_IPs'))} new IP(s) appended to @{parameters('StorageAccountName')}/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}; @{sub(length(variables('Kept_IPs')), length(body('Filter_Unique_New_IPs')))} already present and skipped."
                                                 },
-                                                "path": "/Incidents/Comment"
+                                                "authentication": {
+                                                    "type": "Basic",
+                                                    "username": "@parameters('JIRAUserName')",
+                                                    "password": "@body('Get_Jira_password')?['value']"
+                                                }
                                             },
                                             "runAfter": {
                                                 "Append_IPs_to_Blocklist": [
                                                     "Succeeded"
                                                 ]
+                                            },
+                                            "runtimeConfiguration": {
+                                                "secureData": {
+                                                    "properties": [
+                                                        "inputs"
+                                                    ]
+                                                }
                                             }
                                         }
                                     },
