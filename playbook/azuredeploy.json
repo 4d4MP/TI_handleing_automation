@@ -15,9 +15,9 @@
     "parameters": {
         "PlaybookName": {
             "type": "string",
-            "defaultValue": "Sentinel-IPAbuse-TriageAndBlock",
+            "defaultValue": "TI-handler",
             "metadata": {
-                "description": "Name for the Logic App and its API connections."
+                "description": "Name for the Logic App and its API connections. Must match the deployed Logic App ('TI-handler') so a default deploy updates the existing playbook in place rather than spinning up a second parallel one with a fresh managed identity."
             }
         },
         "Location": {
@@ -29,8 +29,9 @@
         },
         "KeyVaultName": {
             "type": "string",
+            "defaultValue": "LSY-WEUR-ITCS-PRD-KV-02",
             "metadata": {
-                "description": "Name of the Key Vault holding the AbuseIPDB API key and the Jira service account password."
+                "description": "Name of the Key Vault holding the AbuseIPDB API key and the Jira service account password. Defaulted to the production vault so the deploy never falls through to an interactive prompt."
             }
         },
         "JIRAHOST": {
@@ -138,6 +139,11 @@
             "name": "[variables('AzureSentinelConnectionName')]",
             "location": "[parameters('Location')]",
             "kind": "V1",
+            "tags": {
+                "CostCenter": "S60019",
+                "Owner": "lsyh.sysops@lhsystems.com",
+                "assessment-id": "1"
+            },
             "properties": {
                 "displayName": "[variables('AzureSentinelConnectionName')]",
                 "customParameterValues": {},
@@ -153,6 +159,11 @@
             "name": "[variables('KeyVaultConnectionName')]",
             "location": "[parameters('Location')]",
             "kind": "V1",
+            "tags": {
+                "CostCenter": "S60019",
+                "Owner": "lsyh.sysops@lhsystems.com",
+                "assessment-id": "1"
+            },
             "properties": {
                 "displayName": "[variables('KeyVaultConnectionName')]",
                 "parameterValueType": "Alternative",
@@ -171,7 +182,10 @@
             "location": "[parameters('Location')]",
             "tags": {
                 "hidden-SentinelTemplateName": "Sentinel-IPAbuse-TriageAndBlock",
-                "hidden-SentinelTemplateVersion": "1.0.0"
+                "hidden-SentinelTemplateVersion": "1.0.0",
+                "CostCenter": "S60019",
+                "Owner": "lsyh.sysops@lhsystems.com",
+                "assessment-id": "1"
             },
             "identity": {
                 "type": "SystemAssigned"

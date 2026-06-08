@@ -63,7 +63,7 @@ The playbook only appends; it never removes. To unblock an IP:
 If the playbook needs to be re-triggered on an incident (e.g. after fixing a KV permission):
 
 1. In the Sentinel incident, click **Actions → Run playbook**.
-2. Select `Sentinel-IPAbuse-TriageAndBlock`.
+2. Select `TI-handler`.
 3. Note: each re-run creates a fresh Jira ticket. Close the old ticket first to avoid duplicate approvals racing.
 
 ## Reconciling concurrent approvals
