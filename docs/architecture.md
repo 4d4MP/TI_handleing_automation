@@ -32,7 +32,9 @@ Sentinel incident trigger
   │       ├─ On success ─► Compose_Row (build one report row)
   │       └─ On failure  ─► Handle_Failed_Check catches the error (IP is skipped)
   │
-  ├─► Build_Report_Rows = Select(outputs) over result('Foreach') where Compose_Row Succeeded
+  ├─► Build_Report_Rows = the Succeeded Compose_Row outputs, drilled out of
+  │                        result('Foreach') (which groups records per action, then
+  │                        per iteration) and reshaped via Query + Select
   ├─► Build_Kept_IPs    = Select(ip) over Build_Report_Rows kept by the filter below
   │
   └─► If length(Build_Kept_IPs) == 0

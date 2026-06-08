@@ -430,7 +430,7 @@
                                 }
                             }
                         },
-                        "Filter_Row_Actions": {
+                        "Filter_Row_Group": {
                             "runAfter": {
                                 "Check_each_IP_in_AbuseIPDB": [
                                     "Succeeded"
@@ -439,18 +439,30 @@
                             "type": "Query",
                             "inputs": {
                                 "from": "@result('Check_each_IP_in_AbuseIPDB')",
-                                "where": "@and(equals(item()?['name'], 'Compose_Row'), equals(item()?['status'], 'Succeeded'))"
+                                "where": "@equals(item()?['name'], 'Compose_Row')"
+                            }
+                        },
+                        "Filter_Successful_Rows": {
+                            "runAfter": {
+                                "Filter_Row_Group": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@coalesce(first(body('Filter_Row_Group'))?['outputs'], json('[]'))",
+                                "where": "@equals(item()?['status'], 'Succeeded')"
                             }
                         },
                         "Build_Report_Rows": {
                             "runAfter": {
-                                "Filter_Row_Actions": [
+                                "Filter_Successful_Rows": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Select",
                             "inputs": {
-                                "from": "@body('Filter_Row_Actions')",
+                                "from": "@body('Filter_Successful_Rows')",
                                 "select": "@item()?['outputs']"
                             }
                         },
