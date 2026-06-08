@@ -58,8 +58,9 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 | Parameter | Default |
 |---|---|
 | `MinReports` | `100` |
-| `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` |
+| `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (matched case-insensitively as a substring of the ISP name) |
 | `JiraApprovalStatusName` | `Resolved` (matched case-insensitively as a substring of the Jira status) |
+| `JiraClosedStatusName` | `Closed` (status the ticket is auto-transitioned to after approval) |
 | `ApprovalPollIntervalMinutes` | `5` |
 | `ApprovalTimeout` | `PT48H` |
 
@@ -72,7 +73,7 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 5. Empty list → comment "no actionable IPs" + terminate succeeded.
 6. Otherwise: build CSV, open a `Task` in `CLOPSSEC` (description carries the kept-IP count; the full per-IP report rides along as the attached CSV — individual IPs are not listed in the ticket body), attach the CSV, comment the Jira URL on the incident.
 7. Poll the Jira ticket every 5 min until the status (case-insensitive) contains `Resolved`, or timeout.
-8. On approval: GET `$web/index.html`, dedupe new IPs, PUT the updated blob; comment the result on the Trackspace ticket.
+8. On approval: GET `$web/index.html`, dedupe new IPs, PUT the updated blob; comment the result on the Trackspace ticket, then auto-transition the ticket to `Closed` (falls back to leaving it open if no such transition exists).
 9. On timeout / non-approval: comment "approval not received" on the Trackspace ticket; blocklist untouched.
 
 For the full picture see [`docs/architecture.md`](docs/architecture.md). For analyst-side operations see [`docs/runbook.md`](docs/runbook.md).

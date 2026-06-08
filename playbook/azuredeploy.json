@@ -74,6 +74,13 @@
                 "description": "Status string (matched case-insensitively as a substring of the Jira status) that signals the analyst approved the blocklist push."
             }
         },
+        "JiraClosedStatusName": {
+            "type": "string",
+            "defaultValue": "Closed",
+            "metadata": {
+                "description": "Target status the playbook auto-transitions the ticket to after a successful approval/blocklist push. Matched case-insensitively as a substring of each available transition's target status name."
+            }
+        },
         "StorageAccountName": {
             "type": "string",
             "defaultValue": "lsyweuritcsprdmspalo001",
@@ -234,6 +241,10 @@
                         "JiraApprovalStatusName": {
                             "type": "String",
                             "defaultValue": "[parameters('JiraApprovalStatusName')]"
+                        },
+                        "JiraClosedStatusName": {
+                            "type": "String",
+                            "defaultValue": "[parameters('JiraClosedStatusName')]"
                         },
                         "StorageAccountName": {
                             "type": "String",
@@ -480,16 +491,93 @@
                                 "select": "@item()?['outputs']"
                             }
                         },
-                        "Filter_Kept_Rows": {
+                        "Initialize_Excluded_IPs": {
                             "runAfter": {
                                 "Build_Report_Rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "Excluded_IPs",
+                                        "type": "array",
+                                        "value": []
+                                    }
+                                ]
+                            }
+                        },
+                        "Filter_Min_Reports": {
+                            "runAfter": {
+                                "Initialize_Excluded_IPs": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Query",
                             "inputs": {
                                 "from": "@body('Build_Report_Rows')",
-                                "where": "@and(greaterOrEquals(int(item()?['totalReports']), parameters('MinReports')), not(contains(parameters('ExcludedISPs'), toLower(item()?['isp']))))"
+                                "where": "@greaterOrEquals(int(item()?['totalReports']), parameters('MinReports'))"
+                            }
+                        },
+                        "Collect_Excluded_IPs": {
+                            "runAfter": {
+                                "Filter_Min_Reports": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Foreach",
+                            "foreach": "@parameters('ExcludedISPs')",
+                            "actions": {
+                                "Filter_ISP_Match": {
+                                    "runAfter": {},
+                                    "type": "Query",
+                                    "inputs": {
+                                        "from": "@body('Filter_Min_Reports')",
+                                        "where": "@contains(toLower(item()?['isp']), toLower(items('Collect_Excluded_IPs')))"
+                                    }
+                                },
+                                "Select_Excluded_IPs": {
+                                    "runAfter": {
+                                        "Filter_ISP_Match": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "Select",
+                                    "inputs": {
+                                        "from": "@body('Filter_ISP_Match')",
+                                        "select": "@item()?['ip']"
+                                    }
+                                },
+                                "Accumulate_Excluded_IPs": {
+                                    "runAfter": {
+                                        "Select_Excluded_IPs": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "Excluded_IPs",
+                                        "value": "@union(variables('Excluded_IPs'), body('Select_Excluded_IPs'))"
+                                    }
+                                }
+                            },
+                            "runtimeConfiguration": {
+                                "concurrency": {
+                                    "repetitions": 1
+                                }
+                            }
+                        },
+                        "Filter_Kept_Rows": {
+                            "runAfter": {
+                                "Collect_Excluded_IPs": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@body('Filter_Min_Reports')",
+                                "where": "@not(contains(variables('Excluded_IPs'), item()?['ip']))"
                             }
                         },
                         "Build_Kept_IPs": {
@@ -914,6 +1002,139 @@
                                                                 "properties": [
                                                                     "inputs"
                                                                 ]
+                                                            }
+                                                        }
+                                                    },
+                                                    "Get_Jira_Transitions": {
+                                                        "runAfter": {
+                                                            "Comment_Approved_on_Jira": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "Http",
+                                                        "inputs": {
+                                                            "method": "GET",
+                                                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/transitions",
+                                                            "authentication": {
+                                                                "type": "Basic",
+                                                                "username": "@parameters('JIRAUserName')",
+                                                                "password": "@body('Get_Jira_password')?['value']"
+                                                            }
+                                                        },
+                                                        "runtimeConfiguration": {
+                                                            "secureData": {
+                                                                "properties": [
+                                                                    "inputs"
+                                                                ]
+                                                            }
+                                                        }
+                                                    },
+                                                    "Parse_Jira_Transitions": {
+                                                        "runAfter": {
+                                                            "Get_Jira_Transitions": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "ParseJson",
+                                                        "inputs": {
+                                                            "content": "@body('Get_Jira_Transitions')",
+                                                            "schema": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "transitions": {
+                                                                        "type": "array",
+                                                                        "items": {
+                                                                            "type": "object",
+                                                                            "properties": {
+                                                                                "id": {
+                                                                                    "type": "string"
+                                                                                },
+                                                                                "name": {
+                                                                                    "type": [
+                                                                                        "string",
+                                                                                        "null"
+                                                                                    ]
+                                                                                },
+                                                                                "to": {
+                                                                                    "type": "object",
+                                                                                    "properties": {
+                                                                                        "name": {
+                                                                                            "type": [
+                                                                                                "string",
+                                                                                                "null"
+                                                                                            ]
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    },
+                                                    "Filter_Closed_Transition": {
+                                                        "runAfter": {
+                                                            "Parse_Jira_Transitions": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "Query",
+                                                        "inputs": {
+                                                            "from": "@coalesce(body('Parse_Jira_Transitions')?['transitions'], json('[]'))",
+                                                            "where": "@contains(toLower(coalesce(item()?['to']?['name'], item()?['name'], '')), toLower(parameters('JiraClosedStatusName')))"
+                                                        }
+                                                    },
+                                                    "Transition_Jira_to_Closed": {
+                                                        "runAfter": {
+                                                            "Filter_Closed_Transition": [
+                                                                "Succeeded"
+                                                            ]
+                                                        },
+                                                        "type": "If",
+                                                        "expression": {
+                                                            "greater": [
+                                                                "@length(body('Filter_Closed_Transition'))",
+                                                                0
+                                                            ]
+                                                        },
+                                                        "actions": {
+                                                            "Post_Jira_Close_Transition": {
+                                                                "runAfter": {},
+                                                                "type": "Http",
+                                                                "inputs": {
+                                                                    "method": "POST",
+                                                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/transitions",
+                                                                    "headers": {
+                                                                        "Content-Type": "application/json"
+                                                                    },
+                                                                    "body": {
+                                                                        "transition": {
+                                                                            "id": "@{first(body('Filter_Closed_Transition'))?['id']}"
+                                                                        }
+                                                                    },
+                                                                    "authentication": {
+                                                                        "type": "Basic",
+                                                                        "username": "@parameters('JIRAUserName')",
+                                                                        "password": "@body('Get_Jira_password')?['value']"
+                                                                    }
+                                                                },
+                                                                "runtimeConfiguration": {
+                                                                    "secureData": {
+                                                                        "properties": [
+                                                                            "inputs"
+                                                                        ]
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "else": {
+                                                            "actions": {
+                                                                "Compose_No_Closed_Transition": {
+                                                                    "runAfter": {},
+                                                                    "type": "Compose",
+                                                                    "inputs": "No Jira transition to '@{parameters('JiraClosedStatusName')}' is available from the current status; ticket left at the approval status."
+                                                                }
                                                             }
                                                         }
                                                     }
