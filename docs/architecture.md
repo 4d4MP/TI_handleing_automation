@@ -27,17 +27,17 @@ Sentinel incident trigger
   │       │
   │       └─(Failed/TimedOut)─► Comment + Terminate(Failed)
   │
-  ├─► Initialize Kept_IPs, Report_Rows (arrays)
-  │
-  ├─► Foreach IP in body('Entities - Get IPs').IPs  (sequential)
+  ├─► Foreach IP in body('Entities - Get IPs').IPs  (parallel, up to 50 at once)
   │       ├─ AbuseIPDBAPI GET /check?ipAddress=<ip>
-  │       ├─ Append row to Report_Rows
-  │       └─ If totalReports >= MinReports AND toLower(isp) NOT in ExcludedISPs:
-  │             └─ Append ip to Kept_IPs
+  │       ├─ On success ─► Compose_Row (build one report row)
+  │       └─ On failure  ─► Handle_Failed_Check catches the error (IP is skipped)
   │
-  └─► If length(Kept_IPs) == 0
+  ├─► Build_Report_Rows = Select(outputs) over result('Foreach') where Compose_Row Succeeded
+  ├─► Build_Kept_IPs    = Select(ip) over Build_Report_Rows kept by the filter below
+  │
+  └─► If length(Build_Kept_IPs) == 0
         ├─ True  ─► Comment "no actionable IPs" + Terminate(Succeeded)
-        └─ Else  ─► Build_CSV (Table action, format=CSV, from=Report_Rows)
+        └─ Else  ─► Build_CSV (Table action, format=CSV, from=Build_Report_Rows)
                    ├─ Create_Jira_Task  (POST /rest/api/2/issue, Basic auth)
                    ├─ Attach_CSV_to_Jira (POST /rest/api/2/issue/{key}/attachments, multipart)
                    ├─ Comment Jira URL on the incident
@@ -48,7 +48,7 @@ Sentinel incident trigger
                    └─ Switch on (approved | not_approved)
                          ├─ approved:
                          │    ├─ GET blob $web/index.html
-                         │    ├─ Filter Kept_IPs against existing content (dedupe)
+                         │    ├─ Filter Build_Kept_IPs against existing content (dedupe)
                          │    ├─ If anything new: Compose new body + PUT blob
                          │    └─ Comment on incident with count appended/skipped
                          └─ default:
@@ -93,7 +93,7 @@ toLower(coalesce(isp, '')) NOT IN ExcludedISPs
 
 Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (lower-case match).
 
-Every IP — kept or dropped — is recorded in `Report_Rows`, which becomes the CSV attachment. The Jira ticket therefore shows the full enrichment, while only filtered IPs make it into the description and the eventual blocklist.
+Every IP that AbuseIPDB successfully returns — kept or dropped — is recorded in `Build_Report_Rows`, which becomes the CSV attachment. The Jira ticket therefore shows the full enrichment, while only filtered IPs make it into the kept count and the eventual blocklist. IPs whose `/check` call fails (e.g. an HTTP 429 rate-limit, more likely under 50-way parallelism) are skipped by `Handle_Failed_Check` and appear in neither the report nor the kept set.
 
 ## Approval semantics
 
@@ -108,7 +108,7 @@ Default `JiraApprovalStatusName` is `"approval"`, compared case-insensitively. T
 ## Blocklist update semantics
 
 1. `GET https://<acct>.blob.core.windows.net/$web/index.html` (managed identity).
-2. Split the existing content on `\n` (after stripping `\r`) and filter `Kept_IPs` against the resulting array via exact-equality membership. This is line-level dedupe — `1.1.1.1` is not considered "already present" just because `1.1.1.10` appears in the file.
+2. Split the existing content on `\n` (after stripping `\r`) and filter `Build_Kept_IPs` against the resulting array via exact-equality membership. This is line-level dedupe — `1.1.1.1` is not considered "already present" just because `1.1.1.10` appears in the file.
 3. If new IPs remain, build `<existing><\n if needed><newline-joined new>\n` and `PUT` it back as a `BlockBlob` with `x-ms-blob-content-type: text/html` (preserving the static-site MIME).
 4. If nothing new, skip the PUT but still comment on the incident.
 
@@ -120,7 +120,9 @@ Mitigation is operational rather than in-workflow: after a burst of approvals, a
 
 ## Decisions and trade-offs
 
-- **No Function App.** Filtering is small and rare; keeping it inside the Logic App removes a deploy target. The Foreach is sequential (`concurrency.repetitions = 1`) because `AppendToArrayVariable` is not safe under parallel iterations.
+- **No Function App.** Filtering is small and rare; keeping it inside the Logic App removes a deploy target.
+- **Parallel enrichment (`concurrency.repetitions = 50`).** AbuseIPDB is called per IP, so a sequential loop made runtime scale linearly with the IP count. To parallelise we cannot mutate array variables inside the loop — `AppendToArrayVariable` returns unpredictable results under concurrency. Instead each iteration only does its HTTP call and a `Compose_Row`; after the loop, `result('Check_each_IP_in_AbuseIPDB')` exposes every iteration's outputs, which two `Select`/`Query` data operations reshape into `Build_Report_Rows` (the CSV) and `Build_Kept_IPs` (the filtered set). 50 is the documented maximum degree of parallelism for a Foreach. A side effect is that report/kept ordering is now completion order rather than input order; nothing downstream depends on order.
+- **Resilient per-IP enrichment.** Because 50-way concurrency makes transient AbuseIPDB rate-limiting (HTTP 429) more likely, a failed `/check` is caught per iteration by `Handle_Failed_Check` (`runAfter HTTP_Check_IP: [Failed, TimedOut, Skipped]`) so a single failure skips that IP instead of aborting the run. A *total* AbuseIPDB outage is still caught up front by `AbuseIPDB_health_check`, which terminates the run before the loop.
 - **Two HTTP calls to AbuseIPDB per IP would be wasteful**, so the script makes one call per IP and reuses the result for both the report row and the filter decision.
 - **Multipart attachment via HTTP action.** Jira's `/attachments` endpoint requires `multipart/form-data` and `X-Atlassian-Token: no-check`; Logic Apps supports this natively via `body.$multipart`.
 - **Blob via HTTP + managed identity** rather than the Azure Blob connector to avoid the `$web`-container double-encoding gotcha in the V2 connector path.

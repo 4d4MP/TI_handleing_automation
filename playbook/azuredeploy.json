@@ -369,26 +369,6 @@
                                 }
                             }
                         },
-                        "Initialize_Report_Rows": {
-                            "runAfter": {
-                                "AbuseIPDB_health_check": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "type": "InitializeVariable",
-                            "inputs": {
-                                "variables": [
-                                    {
-                                        "name": "Kept_IPs",
-                                        "type": "Array"
-                                    },
-                                    {
-                                        "name": "Report_Rows",
-                                        "type": "Array"
-                                    }
-                                ]
-                            }
-                        },
                         "Check_each_IP_in_AbuseIPDB": {
                             "foreach": "@body('Entities_-_Get_IPs')?['IPs']",
                             "actions": {
@@ -409,81 +389,98 @@
                                         }
                                     }
                                 },
-                                "Append_Report_Row": {
+                                "Compose_Row": {
                                     "runAfter": {
                                         "HTTP_Check_IP": [
                                             "Succeeded"
                                         ]
                                     },
-                                    "type": "AppendToArrayVariable",
+                                    "type": "Compose",
                                     "inputs": {
-                                        "name": "Report_Rows",
-                                        "value": {
-                                            "ip": "@{coalesce(body('HTTP_Check_IP')?['data']?['ipAddress'], items('Check_each_IP_in_AbuseIPDB')?['Address'])}",
-                                            "totalReports": "@{coalesce(body('HTTP_Check_IP')?['data']?['totalReports'], 0)}",
-                                            "abuseConfidenceScore": "@{coalesce(body('HTTP_Check_IP')?['data']?['abuseConfidenceScore'], 0)}",
-                                            "isp": "@{coalesce(body('HTTP_Check_IP')?['data']?['isp'], '')}",
-                                            "country": "@{coalesce(body('HTTP_Check_IP')?['data']?['countryCode'], '')}",
-                                            "usageType": "@{coalesce(body('HTTP_Check_IP')?['data']?['usageType'], '')}",
-                                            "lastReportedAt": "@{coalesce(body('HTTP_Check_IP')?['data']?['lastReportedAt'], '')}"
-                                        }
+                                        "ip": "@{coalesce(body('HTTP_Check_IP')?['data']?['ipAddress'], items('Check_each_IP_in_AbuseIPDB')?['Address'])}",
+                                        "totalReports": "@{coalesce(body('HTTP_Check_IP')?['data']?['totalReports'], 0)}",
+                                        "abuseConfidenceScore": "@{coalesce(body('HTTP_Check_IP')?['data']?['abuseConfidenceScore'], 0)}",
+                                        "isp": "@{coalesce(body('HTTP_Check_IP')?['data']?['isp'], '')}",
+                                        "country": "@{coalesce(body('HTTP_Check_IP')?['data']?['countryCode'], '')}",
+                                        "usageType": "@{coalesce(body('HTTP_Check_IP')?['data']?['usageType'], '')}",
+                                        "lastReportedAt": "@{coalesce(body('HTTP_Check_IP')?['data']?['lastReportedAt'], '')}"
                                     }
                                 },
-                                "Filter_Condition": {
+                                "Handle_Failed_Check": {
                                     "runAfter": {
-                                        "Append_Report_Row": [
-                                            "Succeeded"
+                                        "HTTP_Check_IP": [
+                                            "Failed",
+                                            "TimedOut",
+                                            "Skipped"
                                         ]
                                     },
-                                    "type": "If",
-                                    "expression": {
-                                        "and": [
-                                            {
-                                                "greaterOrEquals": [
-                                                    "@coalesce(body('HTTP_Check_IP')?['data']?['totalReports'], 0)",
-                                                    "@parameters('MinReports')"
-                                                ]
-                                            },
-                                            {
-                                                "not": {
-                                                    "contains": [
-                                                        "@parameters('ExcludedISPs')",
-                                                        "@toLower(coalesce(body('HTTP_Check_IP')?['data']?['isp'], ''))"
-                                                    ]
-                                                }
-                                            }
-                                        ]
-                                    },
-                                    "actions": {
-                                        "Append_to_Kept_IPs": {
-                                            "runAfter": {},
-                                            "type": "AppendToArrayVariable",
-                                            "inputs": {
-                                                "name": "Kept_IPs",
-                                                "value": "@{coalesce(body('HTTP_Check_IP')?['data']?['ipAddress'], items('Check_each_IP_in_AbuseIPDB')?['Address'])}"
-                                            }
-                                        }
-                                    },
-                                    "else": {
-                                        "actions": {}
-                                    }
+                                    "type": "Compose",
+                                    "inputs": "@items('Check_each_IP_in_AbuseIPDB')?['Address']"
                                 }
                             },
                             "runAfter": {
-                                "Initialize_Report_Rows": [
+                                "AbuseIPDB_health_check": [
                                     "Succeeded"
                                 ]
                             },
                             "type": "Foreach",
                             "runtimeConfiguration": {
                                 "concurrency": {
-                                    "repetitions": 1
+                                    "repetitions": 50
                                 }
+                            }
+                        },
+                        "Filter_Row_Actions": {
+                            "runAfter": {
+                                "Check_each_IP_in_AbuseIPDB": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@result('Check_each_IP_in_AbuseIPDB')",
+                                "where": "@and(equals(item()?['name'], 'Compose_Row'), equals(item()?['status'], 'Succeeded'))"
+                            }
+                        },
+                        "Build_Report_Rows": {
+                            "runAfter": {
+                                "Filter_Row_Actions": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@body('Filter_Row_Actions')",
+                                "select": "@item()?['outputs']"
+                            }
+                        },
+                        "Filter_Kept_Rows": {
+                            "runAfter": {
+                                "Build_Report_Rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Query",
+                            "inputs": {
+                                "from": "@body('Build_Report_Rows')",
+                                "where": "@and(greaterOrEquals(int(item()?['totalReports']), parameters('MinReports')), not(contains(parameters('ExcludedISPs'), toLower(item()?['isp']))))"
+                            }
+                        },
+                        "Build_Kept_IPs": {
+                            "runAfter": {
+                                "Filter_Kept_Rows": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "Select",
+                            "inputs": {
+                                "from": "@body('Filter_Kept_Rows')",
+                                "select": "@item()?['ip']"
                             }
                         },
                         "Empty_result_gate": {
                             "runAfter": {
-                                "Check_each_IP_in_AbuseIPDB": [
+                                "Build_Kept_IPs": [
                                     "Succeeded"
                                 ],
                                 "Get_Jira_password": [
@@ -493,7 +490,7 @@
                             "type": "If",
                             "expression": {
                                 "equals": [
-                                    "@length(variables('Kept_IPs'))",
+                                    "@length(body('Build_Kept_IPs'))",
                                     0
                                 ]
                             },
@@ -534,7 +531,7 @@
                                         "type": "Table",
                                         "inputs": {
                                             "format": "CSV",
-                                            "from": "@variables('Report_Rows')"
+                                            "from": "@body('Build_Report_Rows')"
                                         }
                                     },
                                     "Create_Jira_Task": {
@@ -559,7 +556,7 @@
                                                         "id": "@{parameters('JiraIssueTypeId')}"
                                                     },
                                                     "summary": "@{triggerBody()?['object']?['properties']?['title']} — IP block approval (Sentinel #@{triggerBody()?['object']?['properties']?['incidentNumber']})",
-                                                    "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\n@{length(variables('Kept_IPs'))} IP(s) passed AbuseIPDB filtering (totalReports >= @{parameters('MinReports')}, ISP not excluded). The full AbuseIPDB report — including every IP and its scores — is attached as CSV.\n\nMove this ticket to status \"@{parameters('JiraApprovalStatusName')}\" to push the IPs to the blocklist; any other terminal status leaves the blocklist unchanged.",
+                                                    "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\n@{length(body('Build_Kept_IPs'))} IP(s) passed AbuseIPDB filtering (totalReports >= @{parameters('MinReports')}, ISP not excluded). The full AbuseIPDB report — including every IP and its scores — is attached as CSV.\n\nMove this ticket to status \"@{parameters('JiraApprovalStatusName')}\" to push the IPs to the blocklist; any other terminal status leaves the blocklist unchanged.",
                                                     "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}"
                                                 }
                                             },
@@ -651,7 +648,7 @@
                                         "inputs": {
                                             "body": {
                                                 "incidentArmId": "@triggerBody()?['object']?['id']",
-                                                "message": "<p><strong>IP-abuse playbook — approval ticket opened</strong><br>Trackspace: <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a><br>@{length(variables('Kept_IPs'))} IPs await analyst approval. The playbook will poll Jira every @{parameters('ApprovalPollIntervalMinutes')} minutes for up to @{parameters('ApprovalTimeout')}.</p>"
+                                                "message": "<p><strong>IP-abuse playbook — approval ticket opened</strong><br>Trackspace: <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a><br>@{length(body('Build_Kept_IPs'))} IPs await analyst approval. The playbook will poll Jira every @{parameters('ApprovalPollIntervalMinutes')} minutes for up to @{parameters('ApprovalTimeout')}.</p>"
                                             },
                                             "host": {
                                                 "connection": {
@@ -811,7 +808,7 @@
                                                                 },
                                                                 "type": "Query",
                                                                 "inputs": {
-                                                                    "from": "@variables('Kept_IPs')",
+                                                                    "from": "@body('Build_Kept_IPs')",
                                                                     "where": "@not(contains(outputs('Compose_existing_lines'), item()))"
                                                                 }
                                                             },
@@ -878,7 +875,7 @@
                                                                 "Content-Type": "application/json"
                                                             },
                                                             "body": {
-                                                                "body": "Approval received. @{length(body('Filter_Unique_New_IPs'))} new IP(s) appended to @{parameters('StorageAccountName')}/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}; @{sub(length(variables('Kept_IPs')), length(body('Filter_Unique_New_IPs')))} already present and skipped."
+                                                                "body": "Approval received. @{length(body('Filter_Unique_New_IPs'))} new IP(s) appended to @{parameters('StorageAccountName')}/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}; @{sub(length(body('Build_Kept_IPs')), length(body('Filter_Unique_New_IPs')))} already present and skipped."
                                                             },
                                                             "authentication": {
                                                                 "type": "Basic",
