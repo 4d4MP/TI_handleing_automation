@@ -92,10 +92,44 @@ The Logic App's parameters can be edited in the Azure portal (`Logic app → Edi
 | `ApprovalPollIntervalMinutes` | `5` | Faster polling means more Jira API hits — watch rate limits. |
 | `ApprovalMaxIterations` / `ApprovalTimeout` | `576` / `PT48H` | Keep them aligned: `count × poll-interval ≈ timeout`. |
 
+## Verifying what's actually deployed
+
+The CSV attachment is built from `Filter_Kept_Rows`, which sits **after** the
+`MinReports` floor and the ISP exclusion. So a correctly deployed definition
+**cannot** put an excluded ISP (Censys, Palo Alto Networks, …) or an IP with
+`totalReports < MinReports` into the report. If the attachment still shows those,
+the live `TI-handler` is running an **older definition than this repo** — and
+editing `ExcludedISPs` or merging to `main` changes nothing until the running
+Logic App is actually redeployed. (There is no CI/CD here; deploys are manual.)
+
+Confirm what is live (requires `az login` + `jq`):
+
+```bash
+./scripts/verify-deployed-definition.sh
+```
+
+- **PASS** → the deployed `Build_CSV` reads `@body('Filter_Kept_Rows')`; filtering is live and the symptom is something else.
+- **STALE** → it still reads `@body('Build_Report_Rows')` (or another pre-filter source). Redeploy:
+
+  ```bash
+  az deployment group create \
+    --resource-group LSY_WEUR_ITCS_PRD_SEC_RG_002 \
+    --template-file playbook/azuredeploy.json \
+    --parameters @playbook/azuredeploy.parameters.json
+  ```
+
+Then make sure the app you redeployed is the same one the Sentinel automation
+rule triggers. A deploy under the old name `Sentinel-IPAbuse-TriageAndBlock`
+stands up a **second** parallel Logic App and leaves the real `TI-handler`
+untouched (see README) — if two Logic Apps exist in the resource group, the rule
+may still point at the stale one. A portal-side hand-edit of `TI-handler` will
+likewise drift from the repo until the next template deploy overwrites it.
+
 ## On-call triage cheatsheet
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
+| Ticket CSV still lists excluded ISPs (Censys, Palo Alto Networks) or sub-`MinReports` IPs | The deployed Logic App runs a stale definition; the filtering fix was never deployed (or a duplicate/old-named app is the one wired to Sentinel) | Run `./scripts/verify-deployed-definition.sh`; if STALE, redeploy `azuredeploy.json` and confirm the right app is triggered. |
 | `AbuseIPDB_health_check` 401/403 | OMS AbuseIPDB connection auth expired, or the API key bound to the connection was rotated. | Contact OMS to re-authorise `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` in `LSY_WEUR_ITCS_PRD_OMS_RG_001`. |
 | `AbuseIPDB_health_check` 429 | Rate-limited | Wait it out; consider reducing playbook trigger volume or upgrading the AbuseIPDB plan. |
 | `Create_Jira_Task` 401 | Trackspace password rotated | Update `sentinelsvc` secret in KV. |
