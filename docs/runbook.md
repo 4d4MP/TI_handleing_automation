@@ -12,8 +12,8 @@ When a Sentinel incident fires and the playbook runs, the analyst will see one o
 
 1. Open the Trackspace ticket linked from the incident comment.
 2. Open the attachment `abuseipdb_report_<incident-number>.csv` and review:
-   - `ip`, `totalReports`, `abuseConfidenceScore`, `isp`, `country`, `usageType`, `lastReportedAt` for every IP that came out of the incident.
-   - The ticket description lists only the **kept** IPs (those that survived filtering). Those are the ones that will hit the blocklist.
+   - `ip`, `totalReports`, `abuseConfidenceScore`, `isp`, `country`, `usageType`, `lastReportedAt` for each IP that **passed filtering** (`totalReports` ≥ `MinReports` and a non-excluded ISP). These are exactly the IPs proposed for the blocklist — excluded ISPs (Censys, Palo Alto Networks, …) and below-threshold IPs are no longer dumped into the report.
+   - The ticket description carries the **count** of these kept IPs; the CSV is the per-IP detail behind that count.
 3. Decision:
    - **Approve** → transition the ticket to status `Approval` (case-insensitive match — `approval`, `Approval`, `APPROVAL` all work).
      - Within 5 minutes the playbook will add those IPs to `lsyweuritcsprdmspalo001/$web/index.html`, comment the result on the incident, and then auto-transition the ticket to `Closed` (controlled by `JiraClosedStatusName`). If the board offers no transition to `Closed` from the approval status, the playbook leaves the ticket where it is rather than erroring — close it by hand in that case.

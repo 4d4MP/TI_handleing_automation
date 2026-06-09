@@ -358,7 +358,7 @@
                         "Build_CSV": {
                             "type": "Table",
                             "inputs": {
-                                "from": "@body('Build_Report_Rows')",
+                                "from": "@body('Filter_Kept_Rows')",
                                 "format": "CSV"
                             }
                         },

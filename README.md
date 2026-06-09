@@ -71,7 +71,7 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 3. Health-check AbuseIPDB by calling `/check?ipAddress=8.8.8.8` through the `abuseipdbapi-1` connection. Failure → comment + terminate.
 4. Foreach IP: `abuseipdbapi-1` → `GET /check`, append a report row, and (if `totalReports >= MinReports` and ISP is not excluded) append to `Kept_IPs`.
 5. Empty list → comment "no actionable IPs" + terminate succeeded.
-6. Otherwise: build CSV, open a `Task` in `CLOPSSEC` (description carries the kept-IP count; the full per-IP report rides along as the attached CSV — individual IPs are not listed in the ticket body), attach the CSV, comment the Jira URL on the incident.
+6. Otherwise: build a CSV of the **kept** IPs, open a `Task` in `CLOPSSEC` (description carries the kept-IP count; the per-IP detail for those kept IPs rides along as the attached CSV — individual IPs are not listed in the ticket body), attach the CSV, comment the Jira URL on the incident.
 7. Poll the Jira ticket every 5 min until the status (case-insensitive) contains `Resolved`, or timeout.
 8. On approval: GET `$web/index.html`, dedupe new IPs, PUT the updated blob; comment the result on the Trackspace ticket, then auto-transition the ticket to `Closed` (falls back to leaving it open if no such transition exists).
 9. On timeout / non-approval: comment "approval not received" on the Trackspace ticket; blocklist untouched.

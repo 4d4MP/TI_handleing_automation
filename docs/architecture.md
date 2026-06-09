@@ -39,7 +39,7 @@ Sentinel incident trigger
   │
   └─► If length(Build_Kept_IPs) == 0
         ├─ True  ─► Comment "no actionable IPs" + Terminate(Succeeded)
-        └─ Else  ─► Build_CSV (Table action, format=CSV, from=Build_Report_Rows)
+        └─ Else  ─► Build_CSV (Table action, format=CSV, from=Filter_Kept_Rows)
                    ├─ Create_Jira_Task  (POST /rest/api/2/issue, Basic auth)
                    ├─ Attach_CSV_to_Jira (POST /rest/api/2/issue/{key}/attachments, multipart)
                    ├─ Comment Jira URL on the incident
@@ -97,7 +97,7 @@ Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", 
 
 The exclusion is **substring**, not whole-string equality, because AbuseIPDB appends a legal suffix to the ISP name (`"Palo Alto Networks, Inc"`, `"Censys, Inc."`, `"Google LLC"`) that an exact match against the bare entry would miss — the earlier exact-membership test (`contains(ExcludedISPs, toLower(isp))`) let every one of those through. WDL has no inline "any" over an array, so the match is built explicitly: `Filter_Min_Reports` keeps the `MinReports` survivors, then `Collect_Excluded_IPs` loops the (small, static) `ExcludedISPs` list — one sequential iteration per entry (`concurrency.repetitions = 1`, so the `SetVariable` is race-free) — filtering the survivors whose `isp` contains that entry and `union`-ing their IPs into the `Excluded_IPs` variable. `Filter_Kept_Rows` then drops any survivor whose IP is in `Excluded_IPs`.
 
-Every IP that AbuseIPDB successfully returns — kept or dropped — is recorded in `Build_Report_Rows`, which becomes the CSV attachment. The Jira ticket therefore shows the full enrichment, while only filtered IPs make it into the kept count and the eventual blocklist. IPs whose `/check` call fails (e.g. an HTTP 429 rate-limit, more likely under 50-way parallelism) are skipped by `Handle_Failed_Check` and appear in neither the report nor the kept set.
+`Build_Report_Rows` records every IP that AbuseIPDB successfully returns; `Filter_Min_Reports` and the ISP exclusion then narrow it down to `Filter_Kept_Rows` — the IPs that will actually be blocked. The CSV attachment is built from `Filter_Kept_Rows`, so the Jira ticket shows exactly the actionable set with full per-IP detail (no excluded-ISP entries like Censys / Palo Alto and no below-threshold noise), keeping the attachment, the kept count in the description, and the eventual blocklist in agreement. IPs whose `/check` call fails (e.g. an HTTP 429 rate-limit, more likely under 50-way parallelism) are skipped by `Handle_Failed_Check` and appear in neither the report nor the kept set.
 
 ## Approval semantics
 

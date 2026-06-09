@@ -645,7 +645,7 @@
                                         "type": "Table",
                                         "inputs": {
                                             "format": "CSV",
-                                            "from": "@body('Build_Report_Rows')"
+                                            "from": "@body('Filter_Kept_Rows')"
                                         }
                                     },
                                     "Create_Jira_Task": {
