@@ -90,10 +90,12 @@ An IP **survives** the filter iff:
 ```
 coalesce(totalReports, 0) >= MinReports
 AND
-toLower(coalesce(isp, '')) NOT IN ExcludedISPs
+no entry e in ExcludedISPs satisfies  toLower(e) is a substring of toLower(isp)
 ```
 
-Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (lower-case match).
+Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (lower-case **substring** match).
+
+The exclusion is **substring**, not whole-string equality, because AbuseIPDB appends a legal suffix to the ISP name (`"Palo Alto Networks, Inc"`, `"Censys, Inc."`, `"Google LLC"`) that an exact match against the bare entry would miss — the earlier exact-membership test (`contains(ExcludedISPs, toLower(isp))`) let every one of those through. WDL has no inline "any" over an array, so the match is built explicitly: `Filter_Min_Reports` keeps the `MinReports` survivors, then `Collect_Excluded_IPs` loops the (small, static) `ExcludedISPs` list — one sequential iteration per entry (`concurrency.repetitions = 1`, so the `SetVariable` is race-free) — filtering the survivors whose `isp` contains that entry and `union`-ing their IPs into the `Excluded_IPs` variable. `Filter_Kept_Rows` then drops any survivor whose IP is in `Excluded_IPs`.
 
 Every IP that AbuseIPDB successfully returns — kept or dropped — is recorded in `Build_Report_Rows`, which becomes the CSV attachment. The Jira ticket therefore shows the full enrichment, while only filtered IPs make it into the kept count and the eventual blocklist. IPs whose `/check` call fails (e.g. an HTTP 429 rate-limit, more likely under 50-way parallelism) are skipped by `Handle_Failed_Check` and appear in neither the report nor the kept set.
 
@@ -106,6 +108,10 @@ toLower(coalesce(fields.status.name, '')) == toLower(JiraApprovalStatusName)
 ```
 
 Default `JiraApprovalStatusName` is `"approval"`, compared case-insensitively. The Until's `limit.count` and `limit.timeout` are parameterised; with defaults of 576 iterations × 5 min, the playbook waits up to 48 hours. If the timeout fires before approval, the Until action ends in `Failed` / `TimedOut`; the downstream `Final_Switch` is wired to run on those statuses too, lands in the `default` branch, and adds a "approval not received" comment to the incident — the blocklist is **not** modified.
+
+### Auto-close after approval
+
+Once the approval path has appended the IPs and commented on the ticket, the playbook auto-closes the ticket so analysts don't have to do it by hand. It cannot assume a fixed transition ID — those are per-workflow — so it `GET`s `/rest/api/2/issue/{key}/transitions`, picks the transition whose target status name contains `JiraClosedStatusName` (default `"Closed"`, case-insensitive substring) via `Filter_Closed_Transition`, and `POST`s `{transition:{id}}`. If no matching transition is available from the current status (e.g. the board has no Resolved→Closed edge), `Transition_Jira_to_Closed` takes its `else` branch and leaves the ticket at the approval status rather than failing the run.
 
 ## Blocklist update semantics
 

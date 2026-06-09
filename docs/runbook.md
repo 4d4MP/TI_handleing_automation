@@ -16,7 +16,7 @@ When a Sentinel incident fires and the playbook runs, the analyst will see one o
    - The ticket description lists only the **kept** IPs (those that survived filtering). Those are the ones that will hit the blocklist.
 3. Decision:
    - **Approve** → transition the ticket to status `Approval` (case-insensitive match — `approval`, `Approval`, `APPROVAL` all work).
-     - Within 5 minutes the playbook will add those IPs to `lsyweuritcsprdmspalo001/$web/index.html` and comment the result on the incident.
+     - Within 5 minutes the playbook will add those IPs to `lsyweuritcsprdmspalo001/$web/index.html`, comment the result on the incident, and then auto-transition the ticket to `Closed` (controlled by `JiraClosedStatusName`). If the board offers no transition to `Closed` from the approval status, the playbook leaves the ticket where it is rather than erroring — close it by hand in that case.
    - **Reject / close without approving** → move the ticket to any other terminal status. The playbook will eventually time out (default 48 h) and add a "approval not received" comment to the incident; the blocklist will not be modified.
 
 ## After approval
@@ -86,7 +86,8 @@ The Logic App's parameters can be edited in the Azure portal (`Logic app → Edi
 | Parameter | Default | Notes |
 |---|---|---|
 | `MinReports` | `100` | Lower it to be more aggressive, raise it to be more conservative. |
-| `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` | Lower-case. Add new ISPs here; the comparison uses `toLower(isp)`. |
+| `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` | Lower-case. Matched as a **substring** of `toLower(isp)`, so `palo alto networks` catches `"Palo Alto Networks, Inc"`. Keep entries specific enough not to catch unintended ISPs. |
+| `JiraClosedStatusName` | `Closed` | Status the ticket is auto-transitioned to after approval. Case-insensitive substring of the transition's target status. |
 | `JiraApprovalStatusName` | `approval` | Must match the workflow's status string for CLOPSSEC, but casing doesn't matter. |
 | `ApprovalPollIntervalMinutes` | `5` | Faster polling means more Jira API hits — watch rate limits. |
 | `ApprovalMaxIterations` / `ApprovalTimeout` | `576` / `PT48H` | Keep them aligned: `count × poll-interval ≈ timeout`. |
