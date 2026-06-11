@@ -138,7 +138,8 @@
                                 "ipAddress": "@items('Check_each_IP_in_AbuseIPDB')?['Address']",
                                 "maxAgeInDays": 90
                             }
-                        }
+                        },
+                        "runAfter": {}
                     },
                     "Compose_Row": {
                         "type": "Compose",
@@ -254,30 +255,31 @@
                         "inputs": {
                             "from": "@body('Filter_Min_Reports')",
                             "where": "@contains(toLower(item()?['isp']), toLower(items('Collect_Excluded_IPs')))"
-                        }
+                        },
+                        "runAfter": {}
                     },
-                    "Select_Excluded_IPs": {
-                        "type": "Select",
-                        "inputs": {
-                            "from": "@body('Filter_ISP_Match')",
-                            "select": "@item()?['ip']"
+                    "Append_Matched_IPs": {
+                        "type": "Foreach",
+                        "foreach": "@body('Filter_ISP_Match')",
+                        "actions": {
+                            "Append_One_IP": {
+                                "type": "AppendToArrayVariable",
+                                "inputs": {
+                                    "name": "Excluded_IPs",
+                                    "value": "@item()?['ip']"
+                                },
+                                "runAfter": {}
+                            }
                         },
                         "runAfter": {
                             "Filter_ISP_Match": [
                                 "Succeeded"
                             ]
-                        }
-                    },
-                    "Accumulate_Excluded_IPs": {
-                        "type": "SetVariable",
-                        "inputs": {
-                            "name": "Excluded_IPs",
-                            "value": "@union(variables('Excluded_IPs'), body('Select_Excluded_IPs'))"
                         },
-                        "runAfter": {
-                            "Select_Excluded_IPs": [
-                                "Succeeded"
-                            ]
+                        "runtimeConfiguration": {
+                            "concurrency": {
+                                "repetitions": 1
+                            }
                         }
                     }
                 },
@@ -339,7 +341,8 @@
                                 "message": "<p><strong>IP-abuse playbook finished without action.</strong><br>After AbuseIPDB enrichment, no IPs met the threshold (totalReports &ge; @{parameters('MinReports')} and ISP not in the excluded list).</p>"
                             },
                             "path": "/Incidents/Comment"
-                        }
+                        },
+                        "runAfter": {}
                     },
                     "Terminate_No_Actionable_IPs": {
                         "type": "Terminate",
@@ -360,7 +363,8 @@
                             "inputs": {
                                 "from": "@body('Filter_Kept_Rows')",
                                 "format": "CSV"
-                            }
+                            },
+                            "runAfter": {}
                         },
                         "Create_Jira_Task": {
                             "type": "Http",
@@ -502,7 +506,8 @@
                                             "count": "@parameters('ApprovalPollIntervalMinutes')",
                                             "unit": "Minute"
                                         }
-                                    }
+                                    },
+                                    "runAfter": {}
                                 },
                                 "HTTP_Get_Jira_Issue": {
                                     "type": "Http",
@@ -604,7 +609,8 @@
                                                     "inputs"
                                                 ]
                                             }
-                                        }
+                                        },
+                                        "runAfter": {}
                                     }
                                 }
                             },
@@ -626,7 +632,8 @@
                                                             "type": "ManagedServiceIdentity",
                                                             "audience": "https://storage.azure.com/"
                                                         }
-                                                    }
+                                                    },
+                                                    "runAfter": {}
                                                 },
                                                 "Compose_existing_content": {
                                                     "type": "Compose",
@@ -669,7 +676,8 @@
                                                     "actions": {
                                                         "Compose_new_blocklist_content": {
                                                             "type": "Compose",
-                                                            "inputs": "@{concat(outputs('Compose_existing_content'), if(or(equals(outputs('Compose_existing_content'), ''), endsWith(outputs('Compose_existing_content'), '\n')), '', '\n'), join(body('Filter_Unique_New_IPs'), '\n'), '\n')}"
+                                                            "inputs": "@{concat(outputs('Compose_existing_content'), if(or(equals(outputs('Compose_existing_content'), ''), endsWith(outputs('Compose_existing_content'), '\n')), '', '\n'), join(body('Filter_Unique_New_IPs'), '\n'), '\n')}",
+                                                            "runAfter": {}
                                                         },
                                                         "Update_blob": {
                                                             "type": "Http",
@@ -704,7 +712,8 @@
                                                         ]
                                                     }
                                                 }
-                                            }
+                                            },
+                                            "runAfter": {}
                                         },
                                         "Comment_Approved_on_Jira": {
                                             "type": "Http",
@@ -850,14 +859,16 @@
                                                                 "inputs"
                                                             ]
                                                         }
-                                                    }
+                                                    },
+                                                    "runAfter": {}
                                                 }
                                             },
                                             "else": {
                                                 "actions": {
                                                     "Compose_No_Closed_Transition": {
                                                         "type": "Compose",
-                                                        "inputs": "No Jira transition to '@{parameters('JiraClosedStatusName')}' is available from the current status; ticket left at the approval status."
+                                                        "inputs": "No Jira transition to '@{parameters('JiraClosedStatusName')}' is available from the current status; ticket left at the approval status.",
+                                                        "runAfter": {}
                                                     }
                                                 }
                                             },
