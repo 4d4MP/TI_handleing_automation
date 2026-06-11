@@ -537,28 +537,28 @@
                                         "where": "@contains(toLower(item()?['isp']), toLower(items('Collect_Excluded_IPs')))"
                                     }
                                 },
-                                "Select_Excluded_IPs": {
+                                "Append_Matched_IPs": {
                                     "runAfter": {
                                         "Filter_ISP_Match": [
                                             "Succeeded"
                                         ]
                                     },
-                                    "type": "Select",
-                                    "inputs": {
-                                        "from": "@body('Filter_ISP_Match')",
-                                        "select": "@item()?['ip']"
-                                    }
-                                },
-                                "Accumulate_Excluded_IPs": {
-                                    "runAfter": {
-                                        "Select_Excluded_IPs": [
-                                            "Succeeded"
-                                        ]
+                                    "type": "Foreach",
+                                    "foreach": "@body('Filter_ISP_Match')",
+                                    "actions": {
+                                        "Append_One_IP": {
+                                            "runAfter": {},
+                                            "type": "AppendToArrayVariable",
+                                            "inputs": {
+                                                "name": "Excluded_IPs",
+                                                "value": "@item()?['ip']"
+                                            }
+                                        }
                                     },
-                                    "type": "SetVariable",
-                                    "inputs": {
-                                        "name": "Excluded_IPs",
-                                        "value": "@union(variables('Excluded_IPs'), body('Select_Excluded_IPs'))"
+                                    "runtimeConfiguration": {
+                                        "concurrency": {
+                                            "repetitions": 1
+                                        }
                                     }
                                 }
                             },
