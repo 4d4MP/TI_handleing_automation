@@ -1,6 +1,8 @@
 # TI_handleing_automation
 
-Source of truth for the **Sentinel-IPAbuse-TriageAndBlock** playbook: a Microsoft Sentinel Logic App that enriches incident IPs against AbuseIPDB, opens a Trackspace (Jira) approval ticket in `CLOPSSEC` with a CSV report attached, polls until the ticket is approved, and then appends the approved IPs to the static-site blocklist at `lsyweuritcsprdmspalo001/$web/index.html`.
+Source of truth for the **TI-handler** playbook: a Microsoft Sentinel Logic App that, on each incident, **autonomously** raises an OPSLSY *Technical change* (a clone of the template `OPSLSY-75376`), walks it to **Implementation**, enriches the incident IPs against AbuseIPDB, appends the kept IPs to the static-site blocklist at `lsyweuritcsprdmspalo001/$web/index.html`, attaches the CSV report to the change, then walks the change to **Closed** with resolution **Successful**.
+
+There is **no human approval step** and **no CLOPSSEC ticket** — both were removed per a management decision making the flow fully autonomous. If AbuseIPDB is unreachable the same change is still driven to Closed, with the raw (un-enriched) incident IPs attached.
 
 ## Repository layout
 
@@ -11,14 +13,15 @@ Source of truth for the **Sentinel-IPAbuse-TriageAndBlock** playbook: a Microsof
 │   ├── azuredeploy.json               # ARM template: Logic App + API connections (preferred deploy)
 │   └── azuredeploy.parameters.json    # Production values (PlaybookName=TI-handler, KeyVaultName=LSY-WEUR-ITCS-PRD-KV-02)
 ├── docs/
+│   ├── 07-ti-handler-playbook.md      # Knowledge-base page: ticket model, walk, fields, fallback
 │   ├── architecture.md                # Sequence, decisions, RBAC needed
-│   ├── runbook.md                     # What an analyst sees and how to approve / roll back
+│   ├── runbook.md                     # What an analyst sees and how to roll back
 │   └── references/                    # Original reference workflows (kept verbatim)
 ├── README.md
 └── LICENSE
 ```
 
-`workflow.json` and the `definition` block inside `azuredeploy.json` are kept in sync by hand. Edit `workflow.json` first, then mirror the `definition` block into the ARM template before deploying.
+`workflow.json` and the `definition` block inside `azuredeploy.json` are kept in sync by hand. Edit `workflow.json` first, then mirror the `definition` block into the ARM template before deploying. The `jq -S` diff between the two files is expected to be non-empty — only the parameter `defaultValue`s differ (literals in `workflow.json` vs `[parameters('…')]` in ARM); the `actions` and `triggers` must match exactly.
 
 ## Deploy
 
@@ -29,7 +32,7 @@ Prerequisites:
 - Permission to create Logic Apps + API connections in the target resource group.
 - The AbuseIPDB API connection `abuseipdbapi-1` in resource group `LSY_WEUR_ITCS_PRD_SEC_RG_002` must already exist and be authorised. It is built on the OMS-owned `abuseipdbapi` custom connector in `LSY_WEUR_ITCS_PRD_OMS_RG_001`. AbuseIPDB enrichment goes through that connection — this playbook does not store an AbuseIPDB API key of its own.
 
-`azuredeploy.parameters.json` already carries the production values — `PlaybookName=TI-handler` (the deployed Logic App) and `KeyVaultName=LSY-WEUR-ITCS-PRD-KV-02`. **Keep `PlaybookName=TI-handler`**: deploying with the old `Sentinel-IPAbuse-TriageAndBlock` name would stand up a second parallel Logic App with a fresh managed identity and leave the real TI-handler untouched. The template defaults match these values, so an override is only needed to target a different environment.
+`azuredeploy.parameters.json` already carries the production values — `PlaybookName=TI-handler` (the deployed Logic App) and `KeyVaultName=LSY-WEUR-ITCS-PRD-KV-02`. **Keep `PlaybookName=TI-handler`**: deploying with the old `Sentinel-IPAbuse-TriageAndBlock` template name would stand up a second parallel Logic App with a fresh managed identity and leave the real TI-handler untouched. The template defaults match these values, so an override is only needed to target a different environment.
 
 ```bash
 RG=LSY_WEUR_ITCS_PRD_SEC_RG_002
@@ -51,29 +54,34 @@ The deployment outputs `managedIdentityPrincipalId`. Grant it the three roles be
 
 The API connections (`azuresentinel-<PlaybookName>`, `keyvault-<PlaybookName>`) are created by the template but their consent prompts must be approved in the portal on first use (open each connection → "Edit API connection" → Authorize). The third connection used by the playbook — `abuseipdbapi-1` in `LSY_WEUR_ITCS_PRD_SEC_RG_002`, built on the OMS-owned `abuseipdbapi` custom connector in `LSY_WEUR_ITCS_PRD_OMS_RG_001` — is **referenced**, not created, by this template; it should already be authorised in production.
 
+Logic App runs are immutable: after a redeploy, cancel any stuck in-flight runs and fire fresh ones.
+
 ## Configuration
 
-All knobs are workflow parameters and can be tweaked in the portal without redeploying. See `docs/runbook.md` for the table; the most relevant ones:
+All knobs are workflow parameters and can be tweaked in the portal without redeploying. See `docs/07-ti-handler-playbook.md` for the full list; the most relevant ones:
 
 | Parameter | Default |
 |---|---|
+| `JiraProjectKey` | `OPSLSY` |
+| `JiraIssueTypeId` | `13507` (Technical change) |
+| `StatusPlanningName` / `StatusImplementationName` / `StatusPostImplReviewName` / `JiraClosedStatusName` | `Planning` / `Implementation` / `Post implementation review` / `Closed` (each matched case-insensitively as a substring of a transition's target status) |
+| `ChangeOwnerName` / `ChangeAssigneeName` | `u464549` |
+| `ChangeManagerName` | `u761051` (Emil Pollak) |
+| `AffectedItemKey` | `LCJ-37462` |
 | `MinReports` | `100` |
 | `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (matched case-insensitively as a substring of the ISP name) |
-| `JiraApprovalStatusName` | `Resolved` (matched case-insensitively as a substring of the Jira status) |
-| `JiraClosedStatusName` | `Closed` (status the ticket is auto-transitioned to after approval) |
-| `ApprovalPollIntervalMinutes` | `5` |
-| `ApprovalTimeout` | `PT48H` |
 
 ## Workflow at a glance
 
-1. Sentinel incident trigger → `Entities - Get IPs`.
-2. Pull the Jira password from Key Vault (`secureData` so it doesn't appear in run history). AbuseIPDB auth is handled by the `abuseipdbapi-1` connection — no secret retrieval needed.
-3. Health-check AbuseIPDB by calling `/check?ipAddress=8.8.8.8` through the `abuseipdbapi-1` connection. Failure → comment + terminate.
-4. Foreach IP: `abuseipdbapi-1` → `GET /check`, append a report row, and (if `totalReports >= MinReports` and ISP is not excluded) append to `Kept_IPs`.
-5. Empty list → comment "no actionable IPs" + terminate succeeded.
-6. Otherwise: build a CSV of the **kept** IPs, open a `Task` in `CLOPSSEC` (description carries the kept-IP count; the per-IP detail for those kept IPs rides along as the attached CSV — individual IPs are not listed in the ticket body), attach the CSV, comment the Jira URL on the incident.
-7. Poll the Jira ticket every 5 min until the status (case-insensitive) contains `Resolved`, or timeout.
-8. On approval: GET `$web/index.html`, dedupe new IPs, PUT the updated blob; comment the result on the Trackspace ticket, then auto-transition the ticket to `Closed` (falls back to leaving it open if no such transition exists).
-9. On timeout / non-approval: comment "approval not received" on the Trackspace ticket; blocklist untouched.
+1. Sentinel incident trigger → `Entities - Get IPs`; pull the Jira password from Key Vault (`secureData`); compute the run timestamps (`plannedStart`, `plannedEnd = +5 min`, `dateStamp`).
+2. **Create** the OPSLSY Technical change (`POST /issue`, fields whitelist only — not a Jira clone call) and **walk it to Implementation** (Open → Planning → Implementation) — all at run start, before any AbuseIPDB work.
+3. Health-check AbuseIPDB (`/check?ipAddress=8.8.8.8`).
+   - **Up** → per-IP `/check` (50-way), keep rows with `totalReports >= MinReports` and a non-excluded ISP → `Block_IPs` + rich `CSV_Rows`.
+   - **Down** → fallback: build `Block_IPs` + `CSV_Rows` from the **raw** incident IP list. No separate ticket — the change already exists.
+4. **Write the blocklist blob** (ungated): GET `$web/index.html`, line-level dedupe, PUT the appended content.
+5. **Attach** the CSV to the change (`POST /issue/{key}/attachments`, multipart).
+6. **Walk to Closed**: Post implementation review (`resolution=Successful`, actual start/finish) → Closed (`resolution=Successful`). The walk re-probes transitions each step, picks by target status **name** (skipping revoke/withdraw/re-plan/reject/cancel/update-cmdb), and polls status until it lands.
 
-For the full picture see [`docs/architecture.md`](docs/architecture.md). For analyst-side operations see [`docs/runbook.md`](docs/runbook.md).
+No comments are written back to the Sentinel incident at any stage.
+
+For the full picture see [`docs/07-ti-handler-playbook.md`](docs/07-ti-handler-playbook.md) and [`docs/architecture.md`](docs/architecture.md). For analyst-side operations see [`docs/runbook.md`](docs/runbook.md).

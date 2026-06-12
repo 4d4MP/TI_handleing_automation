@@ -1,17 +1,17 @@
-# Architecture — Sentinel IP-Abuse Triage & Block Playbook
+# Architecture — TI-handler playbook
 
 ## Purpose
 
-When a Microsoft Sentinel incident is created, this playbook:
+When a Microsoft Sentinel incident is created, this playbook **autonomously**:
 
 1. Pulls IP entities from the incident.
-2. Enriches each IP against AbuseIPDB.
-3. Filters out IPs that are below the report threshold or owned by an ignored ISP.
-4. Opens a Trackspace (Jira) approval ticket in project `CLOPSSEC` with a CSV report attached.
-5. Polls the Jira ticket every five minutes until its status reaches `Approval` (case-insensitive), or until the configured timeout.
-6. On approval, appends the surviving IPs (one per line, deduped) to a static-site blocklist blob.
+2. Raises an OPSLSY *Technical change* (a logical clone of the template `OPSLSY-75376`) and walks it to **Implementation** — at run start, before any enrichment.
+3. Enriches each IP against AbuseIPDB and filters out IPs below the report threshold or owned by an ignored ISP (on an AbuseIPDB outage, falls back to the raw incident IPs).
+4. Appends the surviving IPs (one per line, deduped) to a static-site blocklist blob — **ungated**; there is no approval.
+5. Attaches the CSV report to the change.
+6. Walks the change to **Closed** with resolution **Successful**.
 
-The whole flow runs in a single Azure Logic App (Consumption). There is no Python — the filter loop lives entirely in the workflow.
+The whole flow runs in a single Azure Logic App (Consumption). There is no Python — the filter loop lives entirely in the workflow. There is **no human approval** and **no CLOPSSEC ticket** (both removed); no comments are written back to the Sentinel incident.
 
 ## Sequence
 
@@ -19,42 +19,29 @@ The whole flow runs in a single Azure Logic App (Consumption). There is no Pytho
 Sentinel incident trigger
   │
   ├─► Entities - Get IPs          (Sentinel connector)
-  │
   ├─► Get_Jira_password           (Key Vault, secureData)
-  │   (AbuseIPDB auth is bound to the OMS-owned AbuseIPDBAPI connection — no KV fetch.)
+  ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart, plannedEnd=+5m, dateStamp)
+  ├─► Initialize Excluded_IPs / Block_IPs / CSV_Rows  (root-level variables)
+  │
+  ├─► Create_OPSLSY_Change        (POST /rest/api/2/issue, Basic auth, fields whitelist)
+  ├─► Parse_Create_Body           (→ issue key)
+  ├─► Walk_to_Planning            (re-probe transitions → POST → poll until landed)
+  ├─► Walk_to_Implementation      (re-probe transitions → POST → poll until landed)
   │
   ├─► AbuseIPDB_health_check (AbuseIPDBAPI GET /check?ipAddress=8.8.8.8)
-  │       │
-  │       └─(Failed/TimedOut)─► Comment + Terminate(Failed)
+  │       ├─(Succeeded)─► Enrichment_Scope
+  │       │                 ├─ Foreach IP (50-way): GET /check → Compose_Row / Handle_Failed_Check
+  │       │                 ├─ Build_Report_Rows → Filter_Min_Reports → Collect_Excluded_IPs → Filter_Kept_Rows
+  │       │                 ├─ Build_Kept_IPs
+  │       │                 └─ Set Block_IPs = kept IPs ; CSV_Rows = kept rows
+  │       └─(Failed/TimedOut/Skipped)─► Fallback_Build_Raw_IPs
+  │                                       └─ Set Block_IPs = raw IPs ; CSV_Rows = raw rows
   │
-  ├─► Foreach IP in body('Entities - Get IPs').IPs  (parallel, up to 50 at once)
-  │       ├─ AbuseIPDBAPI GET /check?ipAddress=<ip>
-  │       ├─ On success ─► Compose_Row (build one report row)
-  │       └─ On failure  ─► Handle_Failed_Check catches the error (IP is skipped)
-  │
-  ├─► Build_Report_Rows = the Succeeded Compose_Row outputs, drilled out of
-  │                        result('Foreach') (which groups records per action, then
-  │                        per iteration) and reshaped via Query + Select
-  ├─► Build_Kept_IPs    = Select(ip) over Build_Report_Rows kept by the filter below
-  │
-  └─► If length(Build_Kept_IPs) == 0
-        ├─ True  ─► Comment "no actionable IPs" + Terminate(Succeeded)
-        └─ Else  ─► Build_CSV (Table action, format=CSV, from=Filter_Kept_Rows)
-                   ├─ Create_Jira_Task  (POST /rest/api/2/issue, Basic auth)
-                   ├─ Attach_CSV_to_Jira (POST /rest/api/2/issue/{key}/attachments, multipart)
-                   ├─ Comment Jira URL on the incident
-                   ├─ Until toLower(status) == toLower(JiraApprovalStatusName)
-                   │     ├─ Delay PT5M
-                   │     ├─ HTTP GET /rest/api/2/issue/{key}?fields=status
-                   │     └─ ParseJson → fields.status.name
-                   └─ Switch on (approved | not_approved)
-                         ├─ approved:
-                         │    ├─ GET blob $web/index.html
-                         │    ├─ Filter Build_Kept_IPs against existing content (dedupe)
-                         │    ├─ If anything new: Compose new body + PUT blob
-                         │    └─ Comment on incident with count appended/skipped
-                         └─ default:
-                              └─ Comment "approval not received"
+  ├─► Build_CSV                    (Table/CSV from CSV_Rows ; runs after whichever branch ran)
+  ├─► Write_Blocklist_Blob         (ungated: GET blob → dedupe Block_IPs → PUT if anything new)
+  ├─► Attach_CSV_to_Jira           (POST /issue/{key}/attachments, multipart)
+  ├─► Walk_to_Post_Implementation_Review  (POST resolution=Successful + actual start/finish, poll)
+  └─► Walk_to_Closed               (POST resolution=Successful, poll until Closed / statusCategory done)
 ```
 
 ## Resources
@@ -62,12 +49,14 @@ Sentinel incident trigger
 | Resource | Type | Purpose |
 |---|---|---|
 | `Microsoft.Logic/workflows` | Logic App (Consumption) | The playbook itself, with a system-assigned managed identity. |
-| `Microsoft.Web/connections` (azuresentinel) | API connection — created by this template | Sentinel incident trigger + `entities/ip` + comments. Auth: managed identity. |
-| `Microsoft.Web/connections` (keyvault) | API connection — created by this template | Reads the Jira service-account password. Auth: managed identity. |
-| `Microsoft.Web/connections/abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` | API connection — **OMS-owned, referenced not created** | Backs the `AbuseIPDBAPI` custom connector. Carries its own AbuseIPDB API key inside the connection resource. |
+| `Microsoft.Web/connections` (azuresentinel) | API connection — created by this template | Sentinel incident trigger + `entities/ip`. Auth: managed identity. |
+| `Microsoft.Web/connections` (keyvault) | API connection — created by this template | Reads the Trackspace service-account password. Auth: managed identity. |
+| `Microsoft.Web/connections/abuseipdbapi-1` | API connection — **OMS-backed, referenced not created** | Backs the AbuseIPDB custom connector. Carries its own AbuseIPDB API key inside the connection resource. |
 | Static-site storage account | External | Hosts the blocklist blob (`$web/index.html`). |
 
-AbuseIPDB calls go through the OMS-owned `AbuseIPDBAPI` custom connector (cross-RG reference to `LSY_WEUR_ITCS_PRD_OMS_RG_001`). This playbook references the existing connection by resource ID; it does not create, modify, or rotate it.
+The Sentinel connection is now only used by the **trigger** and `entities/ip` — the playbook no longer posts incident comments.
+
+AbuseIPDB calls go through the OMS-owned custom connector (cross-RG reference). This playbook references the existing connection by resource ID; it does not create, modify, or rotate it.
 
 Blob storage is intentionally **not** behind an API connection. The Logic App calls `https://<account>.blob.core.windows.net/$web/index.html` directly using the managed identity (`audience=https://storage.azure.com/`), avoiding the connector's double-URL-encoded path for the `$web` container.
 
@@ -77,11 +66,23 @@ Grant on the Logic App's system-assigned identity after first deploy (the ARM te
 
 | Scope | Role | Why |
 |---|---|---|
-| Sentinel workspace | `Microsoft Sentinel Responder` | Read incident entities, add comments. |
-| Key Vault holding the Jira secret | `Key Vault Secrets User` | Read the Jira service-account password. (No AbuseIPDB secret in KV — the OMS connection carries its own auth.) |
+| Sentinel workspace | `Microsoft Sentinel Responder` | Read incident entities. |
+| Key Vault holding the Jira secret | `Key Vault Secrets User` | Read the Trackspace service-account password. |
 | Blocklist storage account | `Storage Blob Data Contributor` | GET + PUT on `$web/index.html`. |
 
-The managed identity does **not** need any permission on the AbuseIPDB connection itself; the API key is baked into the OMS connection resource and used by the Logic Apps runtime when the action is invoked through it.
+The managed identity does **not** need any permission on the AbuseIPDB connection itself; the API key is baked into the OMS connection resource.
+
+## The change ticket — OPSLSY Technical change
+
+`OPSLSY-75376` is the field-rich template. The playbook does **not** call a clone endpoint; it `POST /issue` setting only a whitelist of fields (project `OPSLSY`, issuetype `13507`, summary/description with the run timestamps, planned start/end, category/type/impact/risk/reason/change-tested/rollback/validation/test-reference, owner/assignee/change-manager, and the Affected item). Computed/scripted template fields are not copied. Full field table and the description body are in `docs/07-ti-handler-playbook.md`.
+
+The **Affected item** `customfield_24305` (Elements Connect object) is required to pass the *Start implementation* transition; it is written as `[ { "key": "LCJ-37462" } ]` (see the doc for the unconfirmed-shape note).
+
+### The walk (name-driven)
+
+The transition ids are per-workflow and drift between test and prod, so the walk never hardcodes them. At each step it `GET`s `/issue/{key}/transitions?expand=transitions.fields`, filters to the transition whose `to.name` contains the desired status name (case-insensitive) **and** whose `name` does not contain `revoke / withdraw / re-plan / reject / cancel / update cmdb`, then `POST`s `{transition:{id}, fields:{…}}`. Because heavy Trackspace transitions often drop the HTTP connection but still commit, each step then **polls** `GET /issue/{key}?fields=status` in an `Until` (10 s × up to 60 / PT10M) until the status lands, and the poll runs even if the POST is reported `Failed`/`TimedOut`.
+
+Per-transition `fields`: Planning and Implementation send none (the clone already satisfies the screens/validators); Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` = actual start/finish (only settable on that screen); Closed sends `resolution=Successful`.
 
 ## Filter semantics
 
@@ -93,49 +94,37 @@ AND
 no entry e in ExcludedISPs satisfies  toLower(e) is a substring of toLower(isp)
 ```
 
-Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (lower-case **substring** match).
+Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (lower-case **substring** match — AbuseIPDB appends legal suffixes like `"Palo Alto Networks, Inc"`, so an exact match would miss them). `Filter_Min_Reports` keeps the threshold survivors, `Collect_Excluded_IPs` loops the static `ExcludedISPs` list one sequential iteration at a time (`concurrency.repetitions = 1`, so the append is race-free) collecting matched IPs into `Excluded_IPs`, and `Filter_Kept_Rows` drops any survivor in `Excluded_IPs`. The CSV (`CSV_Rows`) and blocklist set (`Block_IPs`) are both built from the kept rows, so attachment and blocklist agree. IPs whose `/check` call fails are skipped by `Handle_Failed_Check`.
 
-The exclusion is **substring**, not whole-string equality, because AbuseIPDB appends a legal suffix to the ISP name (`"Palo Alto Networks, Inc"`, `"Censys, Inc."`, `"Google LLC"`) that an exact match against the bare entry would miss — the earlier exact-membership test (`contains(ExcludedISPs, toLower(isp))`) let every one of those through. WDL has no inline "any" over an array, so the match is built explicitly: `Filter_Min_Reports` keeps the `MinReports` survivors, then `Collect_Excluded_IPs` loops the (small, static) `ExcludedISPs` list — one sequential iteration per entry (`concurrency.repetitions = 1`, so the `SetVariable` is race-free) — filtering the survivors whose `isp` contains that entry and `union`-ing their IPs into the `Excluded_IPs` variable. `Filter_Kept_Rows` then drops any survivor whose IP is in `Excluded_IPs`.
+### AbuseIPDB outage → raw fallback
 
-`Build_Report_Rows` records every IP that AbuseIPDB successfully returns; `Filter_Min_Reports` and the ISP exclusion then narrow it down to `Filter_Kept_Rows` — the IPs that will actually be blocked. The CSV attachment is built from `Filter_Kept_Rows`, so the Jira ticket shows exactly the actionable set with full per-IP detail (no excluded-ISP entries like Censys / Palo Alto and no below-threshold noise), keeping the attachment, the kept count in the description, and the eventual blocklist in agreement. IPs whose `/check` call fails (e.g. an HTTP 429 rate-limit, more likely under 50-way parallelism) are skipped by `Handle_Failed_Check` and appear in neither the report nor the kept set.
+`AbuseIPDB_health_check` no longer terminates the run. If it fails, `Fallback_Build_Raw_IPs` runs instead of `Enrichment_Scope` and sets `Block_IPs` / `CSV_Rows` from the **raw** `Entities - Get IPs` list. There is no separate ticket and no early termination: the change created at run start is always attached-to and walked to Closed, so it is never stranded in Implementation. `Build_CSV` runs after whichever branch executed (`runAfter` accepts `Succeeded` or `Skipped` from both scopes).
 
-## Approval semantics
-
-The Until loop's exit condition is:
-
-```
-toLower(coalesce(fields.status.name, '')) == toLower(JiraApprovalStatusName)
-```
-
-Default `JiraApprovalStatusName` is `"approval"`, compared case-insensitively. The Until's `limit.count` and `limit.timeout` are parameterised; with defaults of 576 iterations × 5 min, the playbook waits up to 48 hours. If the timeout fires before approval, the Until action ends in `Failed` / `TimedOut`; the downstream `Final_Switch` is wired to run on those statuses too, lands in the `default` branch, and adds a "approval not received" comment to the incident — the blocklist is **not** modified.
-
-### Auto-close after approval
-
-Once the approval path has appended the IPs and commented on the ticket, the playbook auto-closes the ticket so analysts don't have to do it by hand. It cannot assume a fixed transition ID — those are per-workflow — so it `GET`s `/rest/api/2/issue/{key}/transitions`, picks the transition whose target status name contains `JiraClosedStatusName` (default `"Closed"`, case-insensitive substring) via `Filter_Closed_Transition`, and `POST`s `{transition:{id}}`. If no matching transition is available from the current status (e.g. the board has no Resolved→Closed edge), `Transition_Jira_to_Closed` takes its `else` branch and leaves the ticket at the approval status rather than failing the run.
-
-## Blocklist update semantics
+## Blocklist update semantics (ungated)
 
 1. `GET https://<acct>.blob.core.windows.net/$web/index.html` (managed identity).
-2. Split the existing content on `\n` (after stripping `\r`) and filter `Build_Kept_IPs` against the resulting array via exact-equality membership. This is line-level dedupe — `1.1.1.1` is not considered "already present" just because `1.1.1.10` appears in the file.
-3. If new IPs remain, build `<existing><\n if needed><newline-joined new>\n` and `PUT` it back as a `BlockBlob` with `x-ms-blob-content-type: text/html` (preserving the static-site MIME).
-4. If nothing new, skip the PUT but still comment on the incident.
+2. Split the existing content on `\n` (after stripping `\r`) and filter `Block_IPs` against the resulting array via exact-equality membership (line-level dedupe — `1.1.1.1` is not "already present" because `1.1.1.10` exists).
+3. If new IPs remain, build `<existing><\n if needed><newline-joined new>\n` and `PUT` it back as a `BlockBlob` with `x-ms-blob-content-type: text/html`.
+4. If nothing new, skip the PUT.
 
-### Known race window — concurrent approvals
+The write happens on every run regardless of IP count and with no approval gate — it is the actual change being implemented while the ticket sits in Implementation.
 
-The PUT is unconditional (no `If-Match` / blob lease). If two approved playbook runs reach the blob-update step at the same moment, both will read the same baseline, both will compute and PUT new content, and the later writer wins — the earlier writer's IPs are lost. The window is the few seconds between `Get_blob_content` and `Update_blob` per run, so collisions require analysts to approve two tickets within roughly that window.
+### Known race window — concurrent runs
 
-Mitigation is operational rather than in-workflow: after a burst of approvals, an analyst can re-run the playbook on each affected incident — the dedupe in step 2 means re-runs are idempotent, and any IPs lost to the race will be re-appended on the second attempt. The trade-off was taken deliberately to keep the workflow simple; if collisions are observed in practice, switch the `Update_blob` action to use an `If-Match` header (ETag from `Get_blob_content`) with a retry-on-412 Until loop.
+The PUT is unconditional (no `If-Match` / blob lease). Two runs reaching the blob-update step within a few seconds can have the later writer overwrite the earlier one's IPs. Mitigation is operational: re-run the playbook on the affected incidents — the dedupe in step 2 makes re-runs idempotent. If collisions are seen in practice, switch `Update_blob` to an `If-Match` (ETag) header with a retry-on-412 Until loop.
 
 ## Decisions and trade-offs
 
-- **No Function App.** Filtering is small and rare; keeping it inside the Logic App removes a deploy target.
-- **Parallel enrichment (`concurrency.repetitions = 50`).** AbuseIPDB is called per IP, so a sequential loop made runtime scale linearly with the IP count. To parallelise we cannot mutate array variables inside the loop — `AppendToArrayVariable` returns unpredictable results under concurrency. Instead each iteration only does its HTTP call and a `Compose_Row`; after the loop, `result('Check_each_IP_in_AbuseIPDB')` exposes every iteration's outputs, which two `Select`/`Query` data operations reshape into `Build_Report_Rows` (the CSV) and `Build_Kept_IPs` (the filtered set). 50 is the documented maximum degree of parallelism for a Foreach. A side effect is that report/kept ordering is now completion order rather than input order; nothing downstream depends on order.
-- **Resilient per-IP enrichment.** Because 50-way concurrency makes transient AbuseIPDB rate-limiting (HTTP 429) more likely, a failed `/check` is caught per iteration by `Handle_Failed_Check` (`runAfter HTTP_Check_IP: [Failed, TimedOut, Skipped]`) so a single failure skips that IP instead of aborting the run. A *total* AbuseIPDB outage is still caught up front by `AbuseIPDB_health_check`, which terminates the run before the loop.
-- **Two HTTP calls to AbuseIPDB per IP would be wasteful**, so the script makes one call per IP and reuses the result for both the report row and the filter decision.
-- **Multipart attachment via HTTP action.** Jira's `/attachments` endpoint requires `multipart/form-data` and `X-Atlassian-Token: no-check`; Logic Apps supports this natively via `body.$multipart`.
-- **Blob via HTTP + managed identity** rather than the Azure Blob connector to avoid the `$web`-container double-encoding gotcha in the V2 connector path.
-- **Secrets are flagged `secureData`** on the `Get_Jira_password` action (the only Key Vault retrieval left) and on the Jira HTTP calls that include the Basic auth header. AbuseIPDB has no `secureData` flag because the key never enters the workflow — it's bound to the OMS connection.
-- **Shared OMS AbuseIPDB connection** rather than a per-playbook custom connector + KV-stored key. Saves a moving part (no key to rotate, no KV access policy) and matches how the existing `abuseipdb_enrichment.json` playbook already calls AbuseIPDB. Trade-off: an OMS-side rotation, rename, or deletion of `abuseipdb-connection-AbuseIPDB-EnrichIncidentByIPInfo` will break this playbook, since the connection is referenced by absolute resource ID.
+- **Fully autonomous, change-managed.** The approval gate and CLOPSSEC ticket were removed by management decision. The ticket of record is an OPSLSY Technical change that sits in **Implementation** while the work runs and closes when done — matching change-management semantics rather than an approval handshake.
+- **Implementation-first ordering.** The change is created and advanced to Implementation *before* AbuseIPDB work so it is never stranded if enrichment fails; the close walk runs after the blob write + attachment.
+- **Name-driven walk, not hardcoded ids.** Survives test↔prod transition-id drift; the skip-list avoids revoke/withdraw/reject/cancel edges.
+- **Poll-until-landed after each transition.** Trackspace transitions can drop the connection while still committing; trusting the POST response would misreport state.
+- **No Function App.** Filtering is small and rare; keeping it in the Logic App removes a deploy target.
+- **Parallel enrichment (`concurrency.repetitions = 50`).** Each iteration only does its HTTP call + `Compose_Row`; `result()` is reshaped afterwards into report rows and the kept set. Ordering becomes completion order; nothing downstream depends on it.
+- **Resilient per-IP enrichment + outage fallback.** A failed `/check` is caught per iteration; a total AbuseIPDB outage routes to the raw-IP fallback instead of aborting.
+- **Multipart attachment via HTTP action** (`X-Atlassian-Token: no-check`, `body.$multipart`).
+- **Blob via HTTP + managed identity** rather than the Azure Blob connector to avoid the `$web` double-encoding gotcha.
+- **Secrets flagged `secureData`** on `Get_Jira_password` and every Trackspace HTTP call carrying the Basic auth header. AbuseIPDB has no `secureData` flag because the key never enters the workflow.
 
 ## Reference workflows
 
@@ -143,6 +132,4 @@ Originals provided by the user, kept verbatim under `docs/references/`:
 
 - `abuseipdb_enrichment.json` — Sentinel trigger + entities/ip + AbuseIPDB call shape.
 - `trackspacejira_ticket_opener.json` — Key Vault secret pattern + Jira issue creation.
-- `trackspacejira_ticket_close.json` — Jira polling + status parsing pattern.
-
-These are the templates this playbook composes.
+- `trackspacejira_ticket_close.json` — Jira polling + status parsing + transition pattern.

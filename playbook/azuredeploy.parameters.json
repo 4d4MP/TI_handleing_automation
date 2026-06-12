@@ -21,16 +21,34 @@
             "value": "sentinelsvc"
         },
         "JiraProjectKey": {
-            "value": "CLOPSSEC"
+            "value": "OPSLSY"
         },
-        "JiraIssueTypeName": {
-            "value": "Task"
+        "JiraIssueTypeId": {
+            "value": "13507"
         },
-        "JiraApprovalStatusName": {
-            "value": "approval"
+        "StatusPlanningName": {
+            "value": "Planning"
+        },
+        "StatusImplementationName": {
+            "value": "Implementation"
+        },
+        "StatusPostImplReviewName": {
+            "value": "Post implementation review"
         },
         "JiraClosedStatusName": {
             "value": "Closed"
+        },
+        "ChangeOwnerName": {
+            "value": "u464549"
+        },
+        "ChangeAssigneeName": {
+            "value": "u464549"
+        },
+        "ChangeManagerName": {
+            "value": "u761051"
+        },
+        "AffectedItemKey": {
+            "value": "LCJ-37462"
         },
         "StorageAccountName": {
             "value": "lsyweuritcsprdmspalo001"
@@ -52,15 +70,6 @@
                 "the shadowserver foundation",
                 "censys"
             ]
-        },
-        "ApprovalPollIntervalMinutes": {
-            "value": 5
-        },
-        "ApprovalMaxIterations": {
-            "value": 576
-        },
-        "ApprovalTimeout": {
-            "value": "PT48H"
         }
     }
 }
