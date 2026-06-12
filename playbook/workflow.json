@@ -61,158 +61,24 @@
                     }
                 }
             },
-            "AbuseIPDB_health_check": {
-                "type": "ApiConnection",
-                "inputs": {
-                    "host": {
-                        "connection": {
-                            "name": "@parameters('$connections')['abuseipdbapi-1']['connectionId']"
-                        }
-                    },
-                    "method": "get",
-                    "path": "/check",
-                    "queries": {
-                        "ipAddress": "8.8.8.8",
-                        "maxAgeInDays": 90
-                    }
-                },
+            "Capture_Run_Start": {
+                "type": "Compose",
+                "inputs": "@utcNow()",
                 "runAfter": {
                     "Entities_-_Get_IPs": [
                         "Succeeded"
                     ]
                 }
             },
-            "Comment_AbuseIPDB_unreachable": {
-                "type": "ApiConnection",
+            "Compute_Run_Times": {
+                "type": "Compose",
                 "inputs": {
-                    "host": {
-                        "connection": {
-                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                        }
-                    },
-                    "method": "post",
-                    "body": {
-                        "incidentArmId": "@triggerBody()?['object']?['id']",
-                        "message": "<p><strong>AbuseIPDB health check failed against 8.8.8.8</strong><br>HTTP status: @{outputs('AbuseIPDB_health_check')?['statusCode']}. The IP-abuse playbook has been aborted; no Jira ticket was opened and the blocklist was not modified.</p>"
-                    },
-                    "path": "/Incidents/Comment"
+                    "plannedStart": "@{concat(formatDateTime(outputs('Capture_Run_Start'), 'yyyy-MM-dd'), 'T', formatDateTime(outputs('Capture_Run_Start'), 'HH:mm:ss'), '.000+0000')}",
+                    "plannedEnd": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'HH:mm:ss'), '.000+0000')}",
+                    "dateStamp": "@{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
                 },
                 "runAfter": {
-                    "AbuseIPDB_health_check": [
-                        "Failed",
-                        "TimedOut",
-                        "Skipped"
-                    ]
-                }
-            },
-            "Terminate_AbuseIPDB_unreachable": {
-                "type": "Terminate",
-                "inputs": {
-                    "runStatus": "Failed",
-                    "runError": {
-                        "code": "AbuseIPDBUnreachable",
-                        "message": "AbuseIPDB /check returned a non-success status for 8.8.8.8 during the health check."
-                    }
-                },
-                "runAfter": {
-                    "Comment_AbuseIPDB_unreachable": [
-                        "Succeeded"
-                    ]
-                }
-            },
-            "Check_each_IP_in_AbuseIPDB": {
-                "type": "Foreach",
-                "foreach": "@body('Entities_-_Get_IPs')?['IPs']",
-                "actions": {
-                    "HTTP_Check_IP": {
-                        "type": "ApiConnection",
-                        "inputs": {
-                            "host": {
-                                "connection": {
-                                    "name": "@parameters('$connections')['abuseipdbapi-1']['connectionId']"
-                                }
-                            },
-                            "method": "get",
-                            "path": "/check",
-                            "queries": {
-                                "ipAddress": "@items('Check_each_IP_in_AbuseIPDB')?['Address']",
-                                "maxAgeInDays": 90
-                            }
-                        },
-                        "runAfter": {}
-                    },
-                    "Compose_Row": {
-                        "type": "Compose",
-                        "inputs": {
-                            "ip": "@{coalesce(body('HTTP_Check_IP')?['data']?['ipAddress'], items('Check_each_IP_in_AbuseIPDB')?['Address'])}",
-                            "totalReports": "@{coalesce(body('HTTP_Check_IP')?['data']?['totalReports'], 0)}",
-                            "abuseConfidenceScore": "@{coalesce(body('HTTP_Check_IP')?['data']?['abuseConfidenceScore'], 0)}",
-                            "isp": "@{coalesce(body('HTTP_Check_IP')?['data']?['isp'], '')}",
-                            "country": "@{coalesce(body('HTTP_Check_IP')?['data']?['countryCode'], '')}",
-                            "usageType": "@{coalesce(body('HTTP_Check_IP')?['data']?['usageType'], '')}",
-                            "lastReportedAt": "@{coalesce(body('HTTP_Check_IP')?['data']?['lastReportedAt'], '')}"
-                        },
-                        "runAfter": {
-                            "HTTP_Check_IP": [
-                                "Succeeded"
-                            ]
-                        }
-                    },
-                    "Handle_Failed_Check": {
-                        "type": "Compose",
-                        "inputs": "@items('Check_each_IP_in_AbuseIPDB')?['Address']",
-                        "runAfter": {
-                            "HTTP_Check_IP": [
-                                "Failed",
-                                "TimedOut",
-                                "Skipped"
-                            ]
-                        }
-                    }
-                },
-                "runAfter": {
-                    "AbuseIPDB_health_check": [
-                        "Succeeded"
-                    ]
-                },
-                "runtimeConfiguration": {
-                    "concurrency": {
-                        "repetitions": 50
-                    }
-                }
-            },
-            "Filter_Row_Group": {
-                "type": "Query",
-                "inputs": {
-                    "from": "@result('Check_each_IP_in_AbuseIPDB')",
-                    "where": "@equals(item()?['name'], 'Compose_Row')"
-                },
-                "runAfter": {
-                    "Check_each_IP_in_AbuseIPDB": [
-                        "Succeeded"
-                    ]
-                }
-            },
-            "Filter_Successful_Rows": {
-                "type": "Query",
-                "inputs": {
-                    "from": "@coalesce(first(body('Filter_Row_Group'))?['outputs'], json('[]'))",
-                    "where": "@equals(item()?['status'], 'Succeeded')"
-                },
-                "runAfter": {
-                    "Filter_Row_Group": [
-                        "Succeeded"
-                    ]
-                }
-            },
-            "Build_Report_Rows": {
-                "type": "Select",
-                "inputs": {
-                    "from": "@body('Filter_Successful_Rows')",
-                    "select": "@item()?['outputs']"
-                },
-                "runAfter": {
-                    "Filter_Successful_Rows": [
+                    "Capture_Run_Start": [
                         "Succeeded"
                     ]
                 }
@@ -229,16 +95,21 @@
                     ]
                 },
                 "runAfter": {
-                    "Build_Report_Rows": [
+                    "Entities_-_Get_IPs": [
                         "Succeeded"
                     ]
                 }
             },
-            "Filter_Min_Reports": {
-                "type": "Query",
+            "Initialize_Block_IPs": {
+                "type": "InitializeVariable",
                 "inputs": {
-                    "from": "@body('Build_Report_Rows')",
-                    "where": "@greaterOrEquals(int(item()?['totalReports']), parameters('MinReports'))"
+                    "variables": [
+                        {
+                            "name": "Block_IPs",
+                            "type": "array",
+                            "value": []
+                        }
+                    ]
                 },
                 "runAfter": {
                     "Initialize_Excluded_IPs": [
@@ -246,33 +117,729 @@
                     ]
                 }
             },
-            "Collect_Excluded_IPs": {
-                "type": "Foreach",
-                "foreach": "@parameters('ExcludedISPs')",
-                "actions": {
-                    "Filter_ISP_Match": {
-                        "type": "Query",
-                        "inputs": {
-                            "from": "@body('Filter_Min_Reports')",
-                            "where": "@contains(toLower(item()?['isp']), toLower(items('Collect_Excluded_IPs')))"
-                        },
-                        "runAfter": {}
+            "Initialize_CSV_Rows": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "CSV_Rows",
+                            "type": "array",
+                            "value": []
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_Block_IPs": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Create_OPSLSY_Change": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                    "method": "POST",
+                    "headers": {
+                        "Content-Type": "application/json"
                     },
-                    "Append_Matched_IPs": {
-                        "type": "Foreach",
-                        "foreach": "@body('Filter_ISP_Match')",
-                        "actions": {
-                            "Append_One_IP": {
-                                "type": "AppendToArrayVariable",
-                                "inputs": {
-                                    "name": "Excluded_IPs",
-                                    "value": "@item()?['ip']"
-                                },
-                                "runAfter": {}
+                    "body": {
+                        "fields": {
+                            "project": {
+                                "key": "@{parameters('JiraProjectKey')}"
+                            },
+                            "issuetype": {
+                                "id": "@{parameters('JiraIssueTypeId')}"
+                            },
+                            "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{outputs('Compute_Run_Times')['dateStamp']}",
+                            "description": "*GOAL:* Block suspicious/malicious IPs maked by Microsoft Sentinel Threat Intelligence\n*Root-cause:* Several Sentinel alert created indicating there are communication with these IPs.\n*Time frame:* in optimal case approximately 5 minutes\n*Accurate start time:* @{outputs('Compute_Run_Times')['plannedStart']}\n*Accurate finish time:* @{outputs('Compute_Run_Times')['plannedEnd']}\n*Affected Service:* Palo Alto Fws\n*Impact:* Not expected.\n*Tested:* OPSLSY-37786\n*Communicate and contact:* LSYH, BUD NETOPS and LSYH, BUD SECOPS\n*Rollback:* Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs\n\nBlocked IPs can be found in the attachment.",
+                            "customfield_22500": "@{outputs('Compute_Run_Times')['plannedStart']}",
+                            "customfield_22501": "@{outputs('Compute_Run_Times')['plannedEnd']}",
+                            "customfield_10905": {
+                                "id": "36466"
+                            },
+                            "customfield_20619": {
+                                "id": "36471"
+                            },
+                            "customfield_10401": {
+                                "id": "40640"
+                            },
+                            "customfield_16205": {
+                                "id": "40636"
+                            },
+                            "customfield_11417": "Several Sentinel alert created indicating there are communication with these IPs.",
+                            "customfield_22909": {
+                                "id": "32368"
+                            },
+                            "customfield_22222": "Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs",
+                            "customfield_22912": "Check logs in Sentinel. For all affected IPs the 'DeviceAction' value must be 'Deny'",
+                            "customfield_22913": "OPSLSY-37786",
+                            "customfield_12707": {
+                                "name": "@{parameters('ChangeOwnerName')}"
+                            },
+                            "customfield_22914": {
+                                "name": "@{parameters('ChangeManagerName')}"
+                            },
+                            "assignee": {
+                                "name": "@{parameters('ChangeAssigneeName')}"
+                            },
+                            "customfield_24305": [
+                                {
+                                    "key": "@{parameters('AffectedItemKey')}"
+                                }
+                            ]
+                        }
+                    },
+                    "authentication": {
+                        "type": "Basic",
+                        "username": "@parameters('JIRAUserName')",
+                        "password": "@body('Get_Jira_password')?['value']"
+                    }
+                },
+                "runAfter": {
+                    "Get_Jira_password": [
+                        "Succeeded"
+                    ],
+                    "Compute_Run_Times": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "inputs"
+                        ]
+                    }
+                }
+            },
+            "Parse_Create_Body": {
+                "type": "ParseJson",
+                "inputs": {
+                    "content": "@body('Create_OPSLSY_Change')",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string"
+                            },
+                            "key": {
+                                "type": "string"
+                            },
+                            "self": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Create_OPSLSY_Change": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Walk_to_Planning": {
+                "type": "Scope",
+                "actions": {
+                    "Get_Transitions_Planning": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "method": "GET",
+                            "queries": {
+                                "expand": "transitions.fields"
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {},
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Parse_Transitions_Planning": {
+                        "type": "ParseJson",
+                        "inputs": {
+                            "content": "@body('Get_Transitions_Planning')",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "transitions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": [
+                                                        "string",
+                                                        "null"
+                                                    ]
+                                                },
+                                                "to": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "name": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         },
                         "runAfter": {
-                            "Filter_ISP_Match": [
+                            "Get_Transitions_Planning": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_Transition_Planning": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@coalesce(body('Parse_Transitions_Planning')?['transitions'], json('[]'))",
+                            "where": "@and(contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('StatusPlanningName'))), not(or(or(or(or(or(contains(toLower(coalesce(item()?['name'], '')), 'revoke'), contains(toLower(coalesce(item()?['name'], '')), 'withdraw')), contains(toLower(coalesce(item()?['name'], '')), 're-plan')), contains(toLower(coalesce(item()?['name'], '')), 'reject')), contains(toLower(coalesce(item()?['name'], '')), 'cancel')), contains(toLower(coalesce(item()?['name'], '')), 'update cmdb'))))"
+                        },
+                        "runAfter": {
+                            "Parse_Transitions_Planning": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Post_Transition_Planning": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "method": "POST",
+                            "headers": {
+                                "Content-Type": "application/json"
+                            },
+                            "body": {
+                                "transition": {
+                                    "id": "@{first(body('Filter_Transition_Planning'))?['id']}"
+                                }
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {
+                            "Filter_Transition_Planning": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Wait_Until_Planning_Landed": {
+                        "type": "Until",
+                        "expression": "@contains(toLower(coalesce(body('Parse_Status_Planning')?['fields']?['status']?['name'], '')), toLower(parameters('StatusPlanningName')))",
+                        "limit": {
+                            "count": 60,
+                            "timeout": "PT10M"
+                        },
+                        "actions": {
+                            "Delay_Planning": {
+                                "type": "Wait",
+                                "inputs": {
+                                    "interval": {
+                                        "count": 10,
+                                        "unit": "Second"
+                                    }
+                                },
+                                "runAfter": {}
+                            },
+                            "Get_Status_Planning": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                                    "method": "GET",
+                                    "queries": {
+                                        "fields": "status"
+                                    },
+                                    "authentication": {
+                                        "type": "Basic",
+                                        "username": "@parameters('JIRAUserName')",
+                                        "password": "@body('Get_Jira_password')?['value']"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Delay_Planning": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "secureData": {
+                                        "properties": [
+                                            "inputs"
+                                        ]
+                                    }
+                                }
+                            },
+                            "Parse_Status_Planning": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Get_Status_Planning')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "fields": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "status": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "type": [
+                                                                    "string",
+                                                                    "null"
+                                                                ]
+                                                            },
+                                                            "statusCategory": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "key": {
+                                                                        "type": [
+                                                                            "string",
+                                                                            "null"
+                                                                        ]
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Get_Status_Planning": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Post_Transition_Planning": [
+                                "Succeeded",
+                                "Failed",
+                                "TimedOut"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Parse_Create_Body": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Walk_to_Implementation": {
+                "type": "Scope",
+                "actions": {
+                    "Get_Transitions_Implementation": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "method": "GET",
+                            "queries": {
+                                "expand": "transitions.fields"
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {},
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Parse_Transitions_Implementation": {
+                        "type": "ParseJson",
+                        "inputs": {
+                            "content": "@body('Get_Transitions_Implementation')",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "transitions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": [
+                                                        "string",
+                                                        "null"
+                                                    ]
+                                                },
+                                                "to": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "name": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Get_Transitions_Implementation": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_Transition_Implementation": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@coalesce(body('Parse_Transitions_Implementation')?['transitions'], json('[]'))",
+                            "where": "@and(contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('StatusImplementationName'))), not(or(or(or(or(or(contains(toLower(coalesce(item()?['name'], '')), 'revoke'), contains(toLower(coalesce(item()?['name'], '')), 'withdraw')), contains(toLower(coalesce(item()?['name'], '')), 're-plan')), contains(toLower(coalesce(item()?['name'], '')), 'reject')), contains(toLower(coalesce(item()?['name'], '')), 'cancel')), contains(toLower(coalesce(item()?['name'], '')), 'update cmdb'))))"
+                        },
+                        "runAfter": {
+                            "Parse_Transitions_Implementation": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Post_Transition_Implementation": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "method": "POST",
+                            "headers": {
+                                "Content-Type": "application/json"
+                            },
+                            "body": {
+                                "transition": {
+                                    "id": "@{first(body('Filter_Transition_Implementation'))?['id']}"
+                                }
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {
+                            "Filter_Transition_Implementation": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Wait_Until_Implementation_Landed": {
+                        "type": "Until",
+                        "expression": "@contains(toLower(coalesce(body('Parse_Status_Implementation')?['fields']?['status']?['name'], '')), toLower(parameters('StatusImplementationName')))",
+                        "limit": {
+                            "count": 60,
+                            "timeout": "PT10M"
+                        },
+                        "actions": {
+                            "Delay_Implementation": {
+                                "type": "Wait",
+                                "inputs": {
+                                    "interval": {
+                                        "count": 10,
+                                        "unit": "Second"
+                                    }
+                                },
+                                "runAfter": {}
+                            },
+                            "Get_Status_Implementation": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                                    "method": "GET",
+                                    "queries": {
+                                        "fields": "status"
+                                    },
+                                    "authentication": {
+                                        "type": "Basic",
+                                        "username": "@parameters('JIRAUserName')",
+                                        "password": "@body('Get_Jira_password')?['value']"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Delay_Implementation": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "secureData": {
+                                        "properties": [
+                                            "inputs"
+                                        ]
+                                    }
+                                }
+                            },
+                            "Parse_Status_Implementation": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Get_Status_Implementation')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "fields": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "status": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "type": [
+                                                                    "string",
+                                                                    "null"
+                                                                ]
+                                                            },
+                                                            "statusCategory": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "key": {
+                                                                        "type": [
+                                                                            "string",
+                                                                            "null"
+                                                                        ]
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Get_Status_Implementation": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Post_Transition_Implementation": [
+                                "Succeeded",
+                                "Failed",
+                                "TimedOut"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Walk_to_Planning": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "AbuseIPDB_health_check": {
+                "type": "ApiConnection",
+                "inputs": {
+                    "host": {
+                        "connection": {
+                            "name": "@parameters('$connections')['abuseipdbapi-1']['connectionId']"
+                        }
+                    },
+                    "method": "get",
+                    "path": "/check",
+                    "queries": {
+                        "ipAddress": "8.8.8.8",
+                        "maxAgeInDays": 90
+                    }
+                },
+                "runAfter": {
+                    "Walk_to_Implementation": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Enrichment_Scope": {
+                "type": "Scope",
+                "actions": {
+                    "Check_each_IP_in_AbuseIPDB": {
+                        "type": "Foreach",
+                        "foreach": "@body('Entities_-_Get_IPs')?['IPs']",
+                        "actions": {
+                            "HTTP_Check_IP": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['abuseipdbapi-1']['connectionId']"
+                                        }
+                                    },
+                                    "method": "get",
+                                    "path": "/check",
+                                    "queries": {
+                                        "ipAddress": "@items('Check_each_IP_in_AbuseIPDB')?['Address']",
+                                        "maxAgeInDays": 90
+                                    }
+                                },
+                                "runAfter": {}
+                            },
+                            "Compose_Row": {
+                                "type": "Compose",
+                                "inputs": {
+                                    "ip": "@{coalesce(body('HTTP_Check_IP')?['data']?['ipAddress'], items('Check_each_IP_in_AbuseIPDB')?['Address'])}",
+                                    "totalReports": "@{coalesce(body('HTTP_Check_IP')?['data']?['totalReports'], 0)}",
+                                    "abuseConfidenceScore": "@{coalesce(body('HTTP_Check_IP')?['data']?['abuseConfidenceScore'], 0)}",
+                                    "isp": "@{coalesce(body('HTTP_Check_IP')?['data']?['isp'], '')}",
+                                    "country": "@{coalesce(body('HTTP_Check_IP')?['data']?['countryCode'], '')}",
+                                    "usageType": "@{coalesce(body('HTTP_Check_IP')?['data']?['usageType'], '')}",
+                                    "lastReportedAt": "@{coalesce(body('HTTP_Check_IP')?['data']?['lastReportedAt'], '')}"
+                                },
+                                "runAfter": {
+                                    "HTTP_Check_IP": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            },
+                            "Handle_Failed_Check": {
+                                "type": "Compose",
+                                "inputs": "@items('Check_each_IP_in_AbuseIPDB')?['Address']",
+                                "runAfter": {
+                                    "HTTP_Check_IP": [
+                                        "Failed",
+                                        "TimedOut",
+                                        "Skipped"
+                                    ]
+                                }
+                            }
+                        },
+                        "runAfter": {},
+                        "runtimeConfiguration": {
+                            "concurrency": {
+                                "repetitions": 50
+                            }
+                        }
+                    },
+                    "Filter_Row_Group": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@result('Check_each_IP_in_AbuseIPDB')",
+                            "where": "@equals(item()?['name'], 'Compose_Row')"
+                        },
+                        "runAfter": {
+                            "Check_each_IP_in_AbuseIPDB": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_Successful_Rows": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@coalesce(first(body('Filter_Row_Group'))?['outputs'], json('[]'))",
+                            "where": "@equals(item()?['status'], 'Succeeded')"
+                        },
+                        "runAfter": {
+                            "Filter_Row_Group": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Build_Report_Rows": {
+                        "type": "Select",
+                        "inputs": {
+                            "from": "@body('Filter_Successful_Rows')",
+                            "select": "@item()?['outputs']"
+                        },
+                        "runAfter": {
+                            "Filter_Successful_Rows": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_Min_Reports": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@body('Build_Report_Rows')",
+                            "where": "@greaterOrEquals(int(item()?['totalReports']), parameters('MinReports'))"
+                        },
+                        "runAfter": {
+                            "Build_Report_Rows": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Collect_Excluded_IPs": {
+                        "type": "Foreach",
+                        "foreach": "@parameters('ExcludedISPs')",
+                        "actions": {
+                            "Filter_ISP_Match": {
+                                "type": "Query",
+                                "inputs": {
+                                    "from": "@body('Filter_Min_Reports')",
+                                    "where": "@contains(toLower(item()?['isp']), toLower(items('Collect_Excluded_IPs')))"
+                                },
+                                "runAfter": {}
+                            },
+                            "Append_Matched_IPs": {
+                                "type": "Foreach",
+                                "foreach": "@body('Filter_ISP_Match')",
+                                "actions": {
+                                    "Append_One_IP": {
+                                        "type": "AppendToArrayVariable",
+                                        "inputs": {
+                                            "name": "Excluded_IPs",
+                                            "value": "@item()?['ip']"
+                                        },
+                                        "runAfter": {}
+                                    }
+                                },
+                                "runAfter": {
+                                    "Filter_ISP_Match": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "concurrency": {
+                                        "repetitions": 1
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Filter_Min_Reports": [
                                 "Succeeded"
                             ]
                         },
@@ -281,622 +848,722 @@
                                 "repetitions": 1
                             }
                         }
-                    }
-                },
-                "runAfter": {
-                    "Filter_Min_Reports": [
-                        "Succeeded"
-                    ]
-                },
-                "runtimeConfiguration": {
-                    "concurrency": {
-                        "repetitions": 1
-                    }
-                }
-            },
-            "Filter_Kept_Rows": {
-                "type": "Query",
-                "inputs": {
-                    "from": "@body('Filter_Min_Reports')",
-                    "where": "@not(contains(variables('Excluded_IPs'), item()?['ip']))"
-                },
-                "runAfter": {
-                    "Collect_Excluded_IPs": [
-                        "Succeeded"
-                    ]
-                }
-            },
-            "Build_Kept_IPs": {
-                "type": "Select",
-                "inputs": {
-                    "from": "@body('Filter_Kept_Rows')",
-                    "select": "@item()?['ip']"
-                },
-                "runAfter": {
-                    "Filter_Kept_Rows": [
-                        "Succeeded"
-                    ]
-                }
-            },
-            "Empty_result_gate": {
-                "type": "If",
-                "expression": {
-                    "equals": [
-                        "@length(body('Build_Kept_IPs'))",
-                        0
-                    ]
-                },
-                "actions": {
-                    "Comment_No_Actionable_IPs": {
-                        "type": "ApiConnection",
-                        "inputs": {
-                            "host": {
-                                "connection": {
-                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                }
-                            },
-                            "method": "post",
-                            "body": {
-                                "incidentArmId": "@triggerBody()?['object']?['id']",
-                                "message": "<p><strong>IP-abuse playbook finished without action.</strong><br>After AbuseIPDB enrichment, no IPs met the threshold (totalReports &ge; @{parameters('MinReports')} and ISP not in the excluded list).</p>"
-                            },
-                            "path": "/Incidents/Comment"
-                        },
-                        "runAfter": {}
                     },
-                    "Terminate_No_Actionable_IPs": {
-                        "type": "Terminate",
+                    "Filter_Kept_Rows": {
+                        "type": "Query",
                         "inputs": {
-                            "runStatus": "Succeeded"
+                            "from": "@body('Filter_Min_Reports')",
+                            "where": "@not(contains(variables('Excluded_IPs'), item()?['ip']))"
                         },
                         "runAfter": {
-                            "Comment_No_Actionable_IPs": [
+                            "Collect_Excluded_IPs": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Build_Kept_IPs": {
+                        "type": "Select",
+                        "inputs": {
+                            "from": "@body('Filter_Kept_Rows')",
+                            "select": "@item()?['ip']"
+                        },
+                        "runAfter": {
+                            "Filter_Kept_Rows": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Set_Block_IPs_Enriched": {
+                        "type": "SetVariable",
+                        "inputs": {
+                            "name": "Block_IPs",
+                            "value": "@body('Build_Kept_IPs')"
+                        },
+                        "runAfter": {
+                            "Build_Kept_IPs": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Set_CSV_Rows_Enriched": {
+                        "type": "SetVariable",
+                        "inputs": {
+                            "name": "CSV_Rows",
+                            "value": "@body('Filter_Kept_Rows')"
+                        },
+                        "runAfter": {
+                            "Set_Block_IPs_Enriched": [
                                 "Succeeded"
                             ]
                         }
                     }
                 },
-                "else": {
-                    "actions": {
-                        "Build_CSV": {
-                            "type": "Table",
-                            "inputs": {
-                                "from": "@body('Filter_Kept_Rows')",
-                                "format": "CSV"
-                            },
-                            "runAfter": {}
+                "runAfter": {
+                    "AbuseIPDB_health_check": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Fallback_Build_Raw_IPs": {
+                "type": "Scope",
+                "actions": {
+                    "Select_Raw_IPs": {
+                        "type": "Select",
+                        "inputs": {
+                            "from": "@coalesce(body('Entities_-_Get_IPs')?['IPs'], json('[]'))",
+                            "select": "@item()?['Address']"
                         },
-                        "Create_Jira_Task": {
-                            "type": "Http",
-                            "inputs": {
-                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
-                                "method": "POST",
+                        "runAfter": {}
+                    },
+                    "Select_Raw_Rows": {
+                        "type": "Select",
+                        "inputs": {
+                            "from": "@coalesce(body('Entities_-_Get_IPs')?['IPs'], json('[]'))",
+                            "select": {
+                                "ip": "@item()?['Address']"
+                            }
+                        },
+                        "runAfter": {
+                            "Select_Raw_IPs": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Set_Block_IPs_Raw": {
+                        "type": "SetVariable",
+                        "inputs": {
+                            "name": "Block_IPs",
+                            "value": "@body('Select_Raw_IPs')"
+                        },
+                        "runAfter": {
+                            "Select_Raw_Rows": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Set_CSV_Rows_Raw": {
+                        "type": "SetVariable",
+                        "inputs": {
+                            "name": "CSV_Rows",
+                            "value": "@body('Select_Raw_Rows')"
+                        },
+                        "runAfter": {
+                            "Set_Block_IPs_Raw": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "AbuseIPDB_health_check": [
+                        "Failed",
+                        "TimedOut",
+                        "Skipped"
+                    ]
+                }
+            },
+            "Build_CSV": {
+                "type": "Table",
+                "inputs": {
+                    "from": "@variables('CSV_Rows')",
+                    "format": "CSV"
+                },
+                "runAfter": {
+                    "Enrichment_Scope": [
+                        "Succeeded",
+                        "Skipped"
+                    ],
+                    "Fallback_Build_Raw_IPs": [
+                        "Succeeded",
+                        "Skipped"
+                    ]
+                }
+            },
+            "Write_Blocklist_Blob": {
+                "type": "Scope",
+                "actions": {
+                    "Get_blob_content": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "https://@{parameters('StorageAccountName')}.blob.core.windows.net/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}",
+                            "method": "GET",
+                            "headers": {
+                                "x-ms-version": "2021-12-02"
+                            },
+                            "authentication": {
+                                "type": "ManagedServiceIdentity",
+                                "audience": "https://storage.azure.com/"
+                            }
+                        },
+                        "runAfter": {}
+                    },
+                    "Compose_existing_content": {
+                        "type": "Compose",
+                        "inputs": "@{string(body('Get_blob_content'))}",
+                        "runAfter": {
+                            "Get_blob_content": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Compose_existing_lines": {
+                        "type": "Compose",
+                        "inputs": "@split(replace(outputs('Compose_existing_content'), decodeUriComponent('%0D'), ''), decodeUriComponent('%0A'))",
+                        "runAfter": {
+                            "Compose_existing_content": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_Unique_New_IPs": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@variables('Block_IPs')",
+                            "where": "@not(contains(outputs('Compose_existing_lines'), item()))"
+                        },
+                        "runAfter": {
+                            "Compose_existing_lines": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Check_anything_new_to_append": {
+                        "type": "If",
+                        "expression": {
+                            "greater": [
+                                "@length(body('Filter_Unique_New_IPs'))",
+                                0
+                            ]
+                        },
+                        "actions": {
+                            "Compose_new_blocklist_content": {
+                                "type": "Compose",
+                                "inputs": "@{concat(outputs('Compose_existing_content'), if(or(equals(outputs('Compose_existing_content'), ''), endsWith(outputs('Compose_existing_content'), '\n')), '', '\n'), join(body('Filter_Unique_New_IPs'), '\n'), '\n')}",
+                                "runAfter": {}
+                            },
+                            "Update_blob": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "https://@{parameters('StorageAccountName')}.blob.core.windows.net/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}",
+                                    "method": "PUT",
+                                    "headers": {
+                                        "x-ms-version": "2021-12-02",
+                                        "x-ms-blob-type": "BlockBlob",
+                                        "x-ms-blob-content-type": "text/html",
+                                        "Content-Type": "text/html"
+                                    },
+                                    "body": "@outputs('Compose_new_blocklist_content')",
+                                    "authentication": {
+                                        "type": "ManagedServiceIdentity",
+                                        "audience": "https://storage.azure.com/"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Compose_new_blocklist_content": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            }
+                        },
+                        "else": {
+                            "actions": {}
+                        },
+                        "runAfter": {
+                            "Filter_Unique_New_IPs": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Build_CSV": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Attach_CSV_to_Jira": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/attachments",
+                    "method": "POST",
+                    "headers": {
+                        "X-Atlassian-Token": "no-check"
+                    },
+                    "body": {
+                        "$content-type": "multipart/form-data",
+                        "$multipart": [
+                            {
                                 "headers": {
-                                    "Content-Type": "application/json"
+                                    "Content-Disposition": "form-data; name=\"file\"; filename=\"sentinel_blocked_ips_@{triggerBody()?['object']?['properties']?['incidentNumber']}.csv\"",
+                                    "Content-Type": "text/csv"
                                 },
-                                "body": {
-                                    "fields": {
-                                        "project": {
-                                            "key": "@{parameters('JiraProjectKey')}"
-                                        },
-                                        "issuetype": {
-                                            "id": "@{parameters('JiraIssueTypeId')}"
-                                        },
-                                        "summary": "@{triggerBody()?['object']?['properties']?['title']} — IP block approval (Sentinel #@{triggerBody()?['object']?['properties']?['incidentNumber']})",
-                                        "description": "Sentinel incident @{triggerBody()?['object']?['properties']?['incidentNumber']}\n@{triggerBody()?['object']?['properties']?['incidentUrl']}\n\nDescription:\n@{triggerBody()?['object']?['properties']?['description']}\n\n@{length(body('Build_Kept_IPs'))} IP(s) passed AbuseIPDB filtering (totalReports >= @{parameters('MinReports')}, ISP not excluded). The full AbuseIPDB report — including every IP and its scores — is attached as CSV.\n\nMove this ticket to status \"@{parameters('JiraApprovalStatusName')}\" to push the IPs to the blocklist; any other terminal status leaves the blocklist unchanged.",
-                                        "customfield_10602": "@{triggerBody()?['object']?['properties']?['incidentNumber']}"
-                                    }
-                                },
-                                "authentication": {
-                                    "type": "Basic",
-                                    "username": "@parameters('JIRAUserName')",
-                                    "password": "@body('Get_Jira_password')?['value']"
-                                }
+                                "body": "@body('Build_CSV')"
+                            }
+                        ]
+                    },
+                    "authentication": {
+                        "type": "Basic",
+                        "username": "@parameters('JIRAUserName')",
+                        "password": "@body('Get_Jira_password')?['value']"
+                    }
+                },
+                "runAfter": {
+                    "Write_Blocklist_Blob": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "inputs"
+                        ]
+                    }
+                }
+            },
+            "Walk_to_Post_Implementation_Review": {
+                "type": "Scope",
+                "actions": {
+                    "Get_Transitions_PIR": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "method": "GET",
+                            "queries": {
+                                "expand": "transitions.fields"
                             },
-                            "runAfter": {
-                                "Build_CSV": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "runtimeConfiguration": {
-                                "secureData": {
-                                    "properties": [
-                                        "inputs"
-                                    ]
-                                }
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
                             }
                         },
-                        "Parse_Create_Jira_Task_Body": {
-                            "type": "ParseJson",
-                            "inputs": {
-                                "content": "@body('Create_Jira_Task')",
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "id": {
-                                            "type": "string"
-                                        },
-                                        "key": {
-                                            "type": "string"
-                                        },
-                                        "self": {
-                                            "type": "string"
-                                        }
-                                    }
-                                }
-                            },
-                            "runAfter": {
-                                "Create_Jira_Task": [
-                                    "Succeeded"
+                        "runAfter": {},
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
                                 ]
                             }
-                        },
-                        "Attach_CSV_to_Jira": {
-                            "type": "Http",
-                            "inputs": {
-                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/attachments",
-                                "method": "POST",
-                                "headers": {
-                                    "X-Atlassian-Token": "no-check"
-                                },
-                                "body": {
-                                    "$content-type": "multipart/form-data",
-                                    "$multipart": [
-                                        {
-                                            "headers": {
-                                                "Content-Disposition": "form-data; name=\"file\"; filename=\"abuseipdb_report_@{triggerBody()?['object']?['properties']?['incidentNumber']}.csv\"",
-                                                "Content-Type": "text/csv"
-                                            },
-                                            "body": "@body('Build_CSV')"
-                                        }
-                                    ]
-                                },
-                                "authentication": {
-                                    "type": "Basic",
-                                    "username": "@parameters('JIRAUserName')",
-                                    "password": "@body('Get_Jira_password')?['value']"
-                                }
-                            },
-                            "runAfter": {
-                                "Parse_Create_Jira_Task_Body": [
-                                    "Succeeded"
-                                ]
-                            },
-                            "runtimeConfiguration": {
-                                "secureData": {
-                                    "properties": [
-                                        "inputs"
-                                    ]
-                                }
-                            }
-                        },
-                        "Comment_Jira_URL_on_incident": {
-                            "type": "ApiConnection",
-                            "inputs": {
-                                "host": {
-                                    "connection": {
-                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                    }
-                                },
-                                "method": "post",
-                                "body": {
-                                    "incidentArmId": "@triggerBody()?['object']?['id']",
-                                    "message": "<p><strong>IP-abuse playbook — approval ticket opened</strong><br>Trackspace: <a href=\"@{parameters('JIRAHOST')}/browse/@{body('Parse_Create_Jira_Task_Body')?['key']}\">@{body('Parse_Create_Jira_Task_Body')?['key']}</a><br>@{length(body('Build_Kept_IPs'))} IPs await analyst approval. The playbook will poll Jira every @{parameters('ApprovalPollIntervalMinutes')} minutes for up to @{parameters('ApprovalTimeout')}.</p>"
-                                },
-                                "path": "/Incidents/Comment"
-                            },
-                            "runAfter": {
-                                "Attach_CSV_to_Jira": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "Wait_For_Approval": {
-                            "type": "Until",
-                            "expression": "@contains(toLower(coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], '')), toLower(parameters('JiraApprovalStatusName')))",
-                            "limit": {
-                                "count": "@parameters('ApprovalMaxIterations')",
-                                "timeout": "@parameters('ApprovalTimeout')"
-                            },
-                            "actions": {
-                                "Delay_Between_Polls": {
-                                    "type": "Wait",
-                                    "inputs": {
-                                        "interval": {
-                                            "count": "@parameters('ApprovalPollIntervalMinutes')",
-                                            "unit": "Minute"
-                                        }
-                                    },
-                                    "runAfter": {}
-                                },
-                                "HTTP_Get_Jira_Issue": {
-                                    "type": "Http",
-                                    "inputs": {
-                                        "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}",
-                                        "method": "GET",
-                                        "queries": {
-                                            "fields": "status"
-                                        },
-                                        "authentication": {
-                                            "type": "Basic",
-                                            "username": "@parameters('JIRAUserName')",
-                                            "password": "@body('Get_Jira_password')?['value']"
-                                        }
-                                    },
-                                    "runAfter": {
-                                        "Delay_Between_Polls": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "runtimeConfiguration": {
-                                        "secureData": {
-                                            "properties": [
-                                                "inputs"
-                                            ]
-                                        }
-                                    }
-                                },
-                                "Parse_Jira_Status": {
-                                    "type": "ParseJson",
-                                    "inputs": {
-                                        "content": "@body('HTTP_Get_Jira_Issue')",
-                                        "schema": {
+                        }
+                    },
+                    "Parse_Transitions_PIR": {
+                        "type": "ParseJson",
+                        "inputs": {
+                            "content": "@body('Get_Transitions_PIR')",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "transitions": {
+                                        "type": "array",
+                                        "items": {
                                             "type": "object",
                                             "properties": {
-                                                "key": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
                                                     "type": [
                                                         "string",
                                                         "null"
                                                     ]
                                                 },
-                                                "fields": {
+                                                "to": {
                                                     "type": "object",
                                                     "properties": {
-                                                        "status": {
-                                                            "type": "object",
-                                                            "properties": {
-                                                                "name": {
-                                                                    "type": [
-                                                                        "string",
-                                                                        "null"
-                                                                    ]
-                                                                }
-                                                            }
+                                                        "name": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
                                                         }
                                                     }
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Get_Transitions_PIR": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_Transition_PIR": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@coalesce(body('Parse_Transitions_PIR')?['transitions'], json('[]'))",
+                            "where": "@and(contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('StatusPostImplReviewName'))), not(or(or(or(or(or(contains(toLower(coalesce(item()?['name'], '')), 'revoke'), contains(toLower(coalesce(item()?['name'], '')), 'withdraw')), contains(toLower(coalesce(item()?['name'], '')), 're-plan')), contains(toLower(coalesce(item()?['name'], '')), 'reject')), contains(toLower(coalesce(item()?['name'], '')), 'cancel')), contains(toLower(coalesce(item()?['name'], '')), 'update cmdb'))))"
+                        },
+                        "runAfter": {
+                            "Parse_Transitions_PIR": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Post_Transition_PIR": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "method": "POST",
+                            "headers": {
+                                "Content-Type": "application/json"
+                            },
+                            "body": {
+                                "transition": {
+                                    "id": "@{first(body('Filter_Transition_PIR'))?['id']}"
+                                },
+                                "fields": {
+                                    "resolution": {
+                                        "name": "Successful"
                                     },
-                                    "runAfter": {
-                                        "HTTP_Get_Jira_Issue": [
-                                            "Succeeded"
+                                    "customfield_23600": "@{outputs('Compute_Run_Times')['plannedStart']}",
+                                    "customfield_23601": "@{outputs('Compute_Run_Times')['plannedEnd']}"
+                                }
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {
+                            "Filter_Transition_PIR": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Wait_Until_PIR_Landed": {
+                        "type": "Until",
+                        "expression": "@contains(toLower(coalesce(body('Parse_Status_PIR')?['fields']?['status']?['name'], '')), toLower(parameters('StatusPostImplReviewName')))",
+                        "limit": {
+                            "count": 60,
+                            "timeout": "PT10M"
+                        },
+                        "actions": {
+                            "Delay_PIR": {
+                                "type": "Wait",
+                                "inputs": {
+                                    "interval": {
+                                        "count": 10,
+                                        "unit": "Second"
+                                    }
+                                },
+                                "runAfter": {}
+                            },
+                            "Get_Status_PIR": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                                    "method": "GET",
+                                    "queries": {
+                                        "fields": "status"
+                                    },
+                                    "authentication": {
+                                        "type": "Basic",
+                                        "username": "@parameters('JIRAUserName')",
+                                        "password": "@body('Get_Jira_password')?['value']"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Delay_PIR": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "secureData": {
+                                        "properties": [
+                                            "inputs"
                                         ]
                                     }
                                 }
                             },
-                            "runAfter": {
-                                "Comment_Jira_URL_on_incident": [
-                                    "Succeeded"
-                                ]
-                            }
-                        },
-                        "Final_Switch": {
-                            "type": "Switch",
-                            "expression": "@if(equals(toLower(coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], '')), toLower(parameters('JiraApprovalStatusName'))), 'approved', 'not_approved')",
-                            "default": {
-                                "actions": {
-                                    "Comment_Not_Approved_on_Jira": {
-                                        "type": "Http",
-                                        "inputs": {
-                                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/comment",
-                                            "method": "POST",
-                                            "headers": {
-                                                "Content-Type": "application/json"
-                                            },
-                                            "body": {
-                                                "body": "Approval not received. Last observed Jira status: @{coalesce(body('Parse_Jira_Status')?['fields']?['status']?['name'], 'unknown / timeout')}. The blocklist was not modified."
-                                            },
-                                            "authentication": {
-                                                "type": "Basic",
-                                                "username": "@parameters('JIRAUserName')",
-                                                "password": "@body('Get_Jira_password')?['value']"
-                                            }
-                                        },
-                                        "runtimeConfiguration": {
-                                            "secureData": {
-                                                "properties": [
-                                                    "inputs"
-                                                ]
-                                            }
-                                        },
-                                        "runAfter": {}
-                                    }
-                                }
-                            },
-                            "cases": {
-                                "APPROVED": {
-                                    "actions": {
-                                        "Append_IPs_to_Blocklist": {
-                                            "type": "Scope",
-                                            "actions": {
-                                                "Get_blob_content": {
-                                                    "type": "Http",
-                                                    "inputs": {
-                                                        "uri": "https://@{parameters('StorageAccountName')}.blob.core.windows.net/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}",
-                                                        "method": "GET",
-                                                        "headers": {
-                                                            "x-ms-version": "2021-12-02"
-                                                        },
-                                                        "authentication": {
-                                                            "type": "ManagedServiceIdentity",
-                                                            "audience": "https://storage.azure.com/"
-                                                        }
-                                                    },
-                                                    "runAfter": {}
-                                                },
-                                                "Compose_existing_content": {
-                                                    "type": "Compose",
-                                                    "inputs": "@{string(body('Get_blob_content'))}",
-                                                    "runAfter": {
-                                                        "Get_blob_content": [
-                                                            "Succeeded"
-                                                        ]
-                                                    }
-                                                },
-                                                "Compose_existing_lines": {
-                                                    "type": "Compose",
-                                                    "inputs": "@split(replace(outputs('Compose_existing_content'), decodeUriComponent('%0D'), ''), decodeUriComponent('%0A'))",
-                                                    "runAfter": {
-                                                        "Compose_existing_content": [
-                                                            "Succeeded"
-                                                        ]
-                                                    }
-                                                },
-                                                "Filter_Unique_New_IPs": {
-                                                    "type": "Query",
-                                                    "inputs": {
-                                                        "from": "@body('Build_Kept_IPs')",
-                                                        "where": "@not(contains(outputs('Compose_existing_lines'), item()))"
-                                                    },
-                                                    "runAfter": {
-                                                        "Compose_existing_lines": [
-                                                            "Succeeded"
-                                                        ]
-                                                    }
-                                                },
-                                                "Check_anything_new_to_append": {
-                                                    "type": "If",
-                                                    "expression": {
-                                                        "greater": [
-                                                            "@length(body('Filter_Unique_New_IPs'))",
-                                                            0
-                                                        ]
-                                                    },
-                                                    "actions": {
-                                                        "Compose_new_blocklist_content": {
-                                                            "type": "Compose",
-                                                            "inputs": "@{concat(outputs('Compose_existing_content'), if(or(equals(outputs('Compose_existing_content'), ''), endsWith(outputs('Compose_existing_content'), '\n')), '', '\n'), join(body('Filter_Unique_New_IPs'), '\n'), '\n')}",
-                                                            "runAfter": {}
-                                                        },
-                                                        "Update_blob": {
-                                                            "type": "Http",
-                                                            "inputs": {
-                                                                "uri": "https://@{parameters('StorageAccountName')}.blob.core.windows.net/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}",
-                                                                "method": "PUT",
-                                                                "headers": {
-                                                                    "x-ms-version": "2021-12-02",
-                                                                    "x-ms-blob-type": "BlockBlob",
-                                                                    "x-ms-blob-content-type": "text/html",
-                                                                    "Content-Type": "text/html"
-                                                                },
-                                                                "body": "@outputs('Compose_new_blocklist_content')",
-                                                                "authentication": {
-                                                                    "type": "ManagedServiceIdentity",
-                                                                    "audience": "https://storage.azure.com/"
-                                                                }
-                                                            },
-                                                            "runAfter": {
-                                                                "Compose_new_blocklist_content": [
-                                                                    "Succeeded"
+                            "Parse_Status_PIR": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Get_Status_PIR')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "fields": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "status": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "type": [
+                                                                    "string",
+                                                                    "null"
                                                                 ]
-                                                            }
-                                                        }
-                                                    },
-                                                    "else": {
-                                                        "actions": {}
-                                                    },
-                                                    "runAfter": {
-                                                        "Filter_Unique_New_IPs": [
-                                                            "Succeeded"
-                                                        ]
-                                                    }
-                                                }
-                                            },
-                                            "runAfter": {}
-                                        },
-                                        "Comment_Approved_on_Jira": {
-                                            "type": "Http",
-                                            "inputs": {
-                                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/comment",
-                                                "method": "POST",
-                                                "headers": {
-                                                    "Content-Type": "application/json"
-                                                },
-                                                "body": {
-                                                    "body": "Approval received. @{length(body('Filter_Unique_New_IPs'))} new IP(s) appended to @{parameters('StorageAccountName')}/@{parameters('BlocklistContainer')}/@{parameters('BlocklistBlobPath')}; @{sub(length(body('Build_Kept_IPs')), length(body('Filter_Unique_New_IPs')))} already present and skipped."
-                                                },
-                                                "authentication": {
-                                                    "type": "Basic",
-                                                    "username": "@parameters('JIRAUserName')",
-                                                    "password": "@body('Get_Jira_password')?['value']"
-                                                }
-                                            },
-                                            "runAfter": {
-                                                "Append_IPs_to_Blocklist": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "runtimeConfiguration": {
-                                                "secureData": {
-                                                    "properties": [
-                                                        "inputs"
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        "Get_Jira_Transitions": {
-                                            "type": "Http",
-                                            "inputs": {
-                                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/transitions",
-                                                "method": "GET",
-                                                "authentication": {
-                                                    "type": "Basic",
-                                                    "username": "@parameters('JIRAUserName')",
-                                                    "password": "@body('Get_Jira_password')?['value']"
-                                                }
-                                            },
-                                            "runAfter": {
-                                                "Comment_Approved_on_Jira": [
-                                                    "Succeeded"
-                                                ]
-                                            },
-                                            "runtimeConfiguration": {
-                                                "secureData": {
-                                                    "properties": [
-                                                        "inputs"
-                                                    ]
-                                                }
-                                            }
-                                        },
-                                        "Parse_Jira_Transitions": {
-                                            "type": "ParseJson",
-                                            "inputs": {
-                                                "content": "@body('Get_Jira_Transitions')",
-                                                "schema": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "transitions": {
-                                                            "type": "array",
-                                                            "items": {
+                                                            },
+                                                            "statusCategory": {
                                                                 "type": "object",
                                                                 "properties": {
-                                                                    "id": {
-                                                                        "type": "string"
-                                                                    },
-                                                                    "name": {
+                                                                    "key": {
                                                                         "type": [
                                                                             "string",
                                                                             "null"
                                                                         ]
-                                                                    },
-                                                                    "to": {
-                                                                        "type": "object",
-                                                                        "properties": {
-                                                                            "name": {
-                                                                                "type": [
-                                                                                    "string",
-                                                                                    "null"
-                                                                                ]
-                                                                            }
-                                                                        }
                                                                     }
                                                                 }
                                                             }
                                                         }
                                                     }
                                                 }
-                                            },
-                                            "runAfter": {
-                                                "Get_Jira_Transitions": [
-                                                    "Succeeded"
-                                                ]
-                                            }
-                                        },
-                                        "Filter_Closed_Transition": {
-                                            "type": "Query",
-                                            "inputs": {
-                                                "from": "@coalesce(body('Parse_Jira_Transitions')?['transitions'], json('[]'))",
-                                                "where": "@contains(toLower(coalesce(item()?['to']?['name'], item()?['name'], '')), toLower(parameters('JiraClosedStatusName')))"
-                                            },
-                                            "runAfter": {
-                                                "Parse_Jira_Transitions": [
-                                                    "Succeeded"
-                                                ]
-                                            }
-                                        },
-                                        "Transition_Jira_to_Closed": {
-                                            "type": "If",
-                                            "expression": {
-                                                "greater": [
-                                                    "@length(body('Filter_Closed_Transition'))",
-                                                    0
-                                                ]
-                                            },
-                                            "actions": {
-                                                "Post_Jira_Close_Transition": {
-                                                    "type": "Http",
-                                                    "inputs": {
-                                                        "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Jira_Task_Body')?['key']}/transitions",
-                                                        "method": "POST",
-                                                        "headers": {
-                                                            "Content-Type": "application/json"
-                                                        },
-                                                        "body": {
-                                                            "transition": {
-                                                                "id": "@{first(body('Filter_Closed_Transition'))?['id']}"
-                                                            }
-                                                        },
-                                                        "authentication": {
-                                                            "type": "Basic",
-                                                            "username": "@parameters('JIRAUserName')",
-                                                            "password": "@body('Get_Jira_password')?['value']"
-                                                        }
-                                                    },
-                                                    "runtimeConfiguration": {
-                                                        "secureData": {
-                                                            "properties": [
-                                                                "inputs"
-                                                            ]
-                                                        }
-                                                    },
-                                                    "runAfter": {}
-                                                }
-                                            },
-                                            "else": {
-                                                "actions": {
-                                                    "Compose_No_Closed_Transition": {
-                                                        "type": "Compose",
-                                                        "inputs": "No Jira transition to '@{parameters('JiraClosedStatusName')}' is available from the current status; ticket left at the approval status.",
-                                                        "runAfter": {}
-                                                    }
-                                                }
-                                            },
-                                            "runAfter": {
-                                                "Filter_Closed_Transition": [
-                                                    "Succeeded"
-                                                ]
                                             }
                                         }
-                                    },
-                                    "case": "approved"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Get_Status_PIR": [
+                                        "Succeeded"
+                                    ]
                                 }
-                            },
-                            "runAfter": {
-                                "Wait_For_Approval": [
-                                    "Succeeded",
-                                    "Failed",
-                                    "TimedOut"
-                                ]
                             }
+                        },
+                        "runAfter": {
+                            "Post_Transition_PIR": [
+                                "Succeeded",
+                                "Failed",
+                                "TimedOut"
+                            ]
                         }
                     }
                 },
                 "runAfter": {
-                    "Build_Kept_IPs": [
+                    "Attach_CSV_to_Jira": [
                         "Succeeded"
-                    ],
-                    "Get_Jira_password": [
+                    ]
+                }
+            },
+            "Walk_to_Closed": {
+                "type": "Scope",
+                "actions": {
+                    "Get_Transitions_Closed": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "method": "GET",
+                            "queries": {
+                                "expand": "transitions.fields"
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {},
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Parse_Transitions_Closed": {
+                        "type": "ParseJson",
+                        "inputs": {
+                            "content": "@body('Get_Transitions_Closed')",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "transitions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "name": {
+                                                    "type": [
+                                                        "string",
+                                                        "null"
+                                                    ]
+                                                },
+                                                "to": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "name": {
+                                                            "type": [
+                                                                "string",
+                                                                "null"
+                                                            ]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Get_Transitions_Closed": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Filter_Transition_Closed": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@coalesce(body('Parse_Transitions_Closed')?['transitions'], json('[]'))",
+                            "where": "@and(contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('JiraClosedStatusName'))), not(or(or(or(or(or(contains(toLower(coalesce(item()?['name'], '')), 'revoke'), contains(toLower(coalesce(item()?['name'], '')), 'withdraw')), contains(toLower(coalesce(item()?['name'], '')), 're-plan')), contains(toLower(coalesce(item()?['name'], '')), 'reject')), contains(toLower(coalesce(item()?['name'], '')), 'cancel')), contains(toLower(coalesce(item()?['name'], '')), 'update cmdb'))))"
+                        },
+                        "runAfter": {
+                            "Parse_Transitions_Closed": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Post_Transition_Closed": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "method": "POST",
+                            "headers": {
+                                "Content-Type": "application/json"
+                            },
+                            "body": {
+                                "transition": {
+                                    "id": "@{first(body('Filter_Transition_Closed'))?['id']}"
+                                },
+                                "fields": {
+                                    "resolution": {
+                                        "name": "Successful"
+                                    }
+                                }
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {
+                            "Filter_Transition_Closed": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Wait_Until_Closed_Landed": {
+                        "type": "Until",
+                        "expression": "@or(contains(toLower(coalesce(body('Parse_Status_Closed')?['fields']?['status']?['name'], '')), toLower(parameters('JiraClosedStatusName'))), equals(toLower(coalesce(body('Parse_Status_Closed')?['fields']?['status']?['statusCategory']?['key'], '')), 'done'))",
+                        "limit": {
+                            "count": 60,
+                            "timeout": "PT10M"
+                        },
+                        "actions": {
+                            "Delay_Closed": {
+                                "type": "Wait",
+                                "inputs": {
+                                    "interval": {
+                                        "count": 10,
+                                        "unit": "Second"
+                                    }
+                                },
+                                "runAfter": {}
+                            },
+                            "Get_Status_Closed": {
+                                "type": "Http",
+                                "inputs": {
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                                    "method": "GET",
+                                    "queries": {
+                                        "fields": "status"
+                                    },
+                                    "authentication": {
+                                        "type": "Basic",
+                                        "username": "@parameters('JIRAUserName')",
+                                        "password": "@body('Get_Jira_password')?['value']"
+                                    }
+                                },
+                                "runAfter": {
+                                    "Delay_Closed": [
+                                        "Succeeded"
+                                    ]
+                                },
+                                "runtimeConfiguration": {
+                                    "secureData": {
+                                        "properties": [
+                                            "inputs"
+                                        ]
+                                    }
+                                }
+                            },
+                            "Parse_Status_Closed": {
+                                "type": "ParseJson",
+                                "inputs": {
+                                    "content": "@body('Get_Status_Closed')",
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "fields": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "status": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "type": [
+                                                                    "string",
+                                                                    "null"
+                                                                ]
+                                                            },
+                                                            "statusCategory": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "key": {
+                                                                        "type": [
+                                                                            "string",
+                                                                            "null"
+                                                                        ]
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "runAfter": {
+                                    "Get_Status_Closed": [
+                                        "Succeeded"
+                                    ]
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Post_Transition_Closed": [
+                                "Succeeded",
+                                "Failed",
+                                "TimedOut"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Walk_to_Post_Implementation_Review": [
                         "Succeeded"
                     ]
                 }
@@ -917,23 +1584,43 @@
                 "type": "String"
             },
             "JiraProjectKey": {
-                "defaultValue": "CLOPSSEC",
-                "type": "String"
-            },
-            "JiraIssueTypeName": {
-                "defaultValue": "Task",
+                "defaultValue": "OPSLSY",
                 "type": "String"
             },
             "JiraIssueTypeId": {
-                "defaultValue": "10",
+                "defaultValue": "13507",
                 "type": "String"
             },
-            "JiraApprovalStatusName": {
-                "defaultValue": "Resolved",
+            "StatusPlanningName": {
+                "defaultValue": "Planning",
+                "type": "String"
+            },
+            "StatusImplementationName": {
+                "defaultValue": "Implementation",
+                "type": "String"
+            },
+            "StatusPostImplReviewName": {
+                "defaultValue": "Post implementation review",
                 "type": "String"
             },
             "JiraClosedStatusName": {
                 "defaultValue": "Closed",
+                "type": "String"
+            },
+            "ChangeOwnerName": {
+                "defaultValue": "u464549",
+                "type": "String"
+            },
+            "ChangeAssigneeName": {
+                "defaultValue": "u464549",
+                "type": "String"
+            },
+            "ChangeManagerName": {
+                "defaultValue": "u761051",
+                "type": "String"
+            },
+            "AffectedItemKey": {
+                "defaultValue": "LCJ-37462",
                 "type": "String"
             },
             "StorageAccountName": {
@@ -961,18 +1648,6 @@
                     "censys"
                 ],
                 "type": "Array"
-            },
-            "ApprovalPollIntervalMinutes": {
-                "defaultValue": 5,
-                "type": "Int"
-            },
-            "ApprovalMaxIterations": {
-                "defaultValue": 576,
-                "type": "Int"
-            },
-            "ApprovalTimeout": {
-                "defaultValue": "PT48H",
-                "type": "String"
             },
             "$connections": {
                 "type": "Object",

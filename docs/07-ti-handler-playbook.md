@@ -1,0 +1,245 @@
+# 07 — TI-handler playbook (Sentinel → OPSLSY Technical change → blocklist)
+
+**Logic App:** `TI-handler` (Consumption) in `LSY_WEUR_ITCS_PRD_SEC_RG_002`.
+**Source of truth:** `playbook/workflow.json` + `playbook/azuredeploy.json` in this repo.
+**Trigger:** Microsoft Sentinel incident creation.
+
+The playbook is **fully autonomous** — there is no human approval step. On every
+incident it raises one OPSLSY *Technical change*, drives it to **Implementation**,
+enriches the incident IPs, writes the Palo Alto blocklist blob, attaches the CSV,
+then walks the change to **Closed** with resolution **Successful**.
+
+> **History:** this playbook previously opened a **CLOPSSEC** approval Task, waited
+> up to 48 h for an analyst to move it to an approval status, and only then wrote
+> the blocklist. Per a management decision that approval gate was removed and the
+> ticket of record moved to an OPSLSY Technical change. All CLOPSSEC actions, the
+> `Wait_For_Approval` Until loop, the approve/not-approved switch, and every comment
+> the playbook used to write back to the Sentinel incident are gone.
+
+---
+
+## Order of operations (implementation-first)
+
+```
+trigger
+  → create OPSLSY clone        (POST /issue, fields whitelist below)
+  → walk to Implementation     (Open → Planning → Implementation, at run start)
+  → enrich + build CSV         (AbuseIPDB filter/dedupe → kept-IP rows)
+  → write blocklist blob       (ungated — the actual change being implemented)
+  → attach CSV                 (POST /issue/{key}/attachments)
+  → walk to Closed             (Post implementation review → Closed, resolution Successful)
+```
+
+The change sits in **Implementation** for the duration of the real work (enrichment +
+blocklist write), matching change-management semantics, then closes when the work is
+done. The clone is created and advanced to Implementation **before any AbuseIPDB
+work** so the ticket is never stranded if enrichment fails.
+
+All Trackspace calls use **Basic auth** — service account `sentinelsvc` with the
+Key Vault secret `sentinelsvc` (read via the `keyvault-TI-handler` connection,
+flagged `secureData`). Base URL `https://trackspace.lhsystems.com/rest/api/2/`.
+
+---
+
+## The ticket — OPSLSY Technical change (clone of OPSLSY-75376)
+
+`OPSLSY-75376` is the field-rich template Technical change. The playbook does **not**
+call a Jira clone endpoint; it `POST /issue` with only the whitelist below. Computed
+/ scripted fields on the template are deliberately **not** copied (time-in-status,
+SLA, "Resolved by", rank, dev-summary, last-comment, the `customfield_18422`
+`<script>` "Label" hack, etc.).
+
+### Runtime values (computed once at run start)
+
+`Capture_Run_Start` (Compose `@utcNow()`) pins a single instant; `Compute_Run_Times`
+derives the rest so start/end are consistent. Timestamps are built with `concat` (not
+a `formatDateTime` mask) to avoid the literal-`T`/`+0000` escaping trap:
+
+| Value | Expression | Example |
+|---|---|---|
+| `plannedStart` | `concat(formatDateTime(start,'yyyy-MM-dd'),'T',formatDateTime(start,'HH:mm:ss'),'.000+0000')` | `2026-06-12T09:30:00.000+0000` |
+| `plannedEnd` | same over `addMinutes(start,5)` | `2026-06-12T09:35:00.000+0000` |
+| `actualStart` | = `plannedStart` (set on the PIR transition) | |
+| `actualFinish` | = `plannedEnd` (set on the PIR transition) | |
+| `dateStamp` | `formatDateTime(start,'yyyy.MM.dd')` (for the summary) | `2026.06.12` |
+
+The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
+
+### Fields set on create
+
+| Field | id | Value |
+|---|---|---|
+| Summary | `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` |
+| Description | `description` | template body below, with Accurate start/finish = `plannedStart`/`plannedEnd` |
+| Planned start | `customfield_22500` | `plannedStart` |
+| Planned end | `customfield_22501` | `plannedEnd` |
+| Category | `customfield_10905` | `{ "id": "36466" }` (3 - Medium) |
+| Type | `customfield_20619` | `{ "id": "36471" }` (Standard Change) |
+| Impact | `customfield_10401` | `{ "id": "40640" }` (Low) |
+| Risk level | `customfield_16205` | `{ "id": "40636" }` (Low) |
+| Reason | `customfield_11417` | `Several Sentinel alert created indicating there are communication with these IPs.` |
+| Change tested | `customfield_22909` | `{ "id": "32368" }` (Tested) |
+| Rollback scenario | `customfield_22222` | `Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs` |
+| Validation procedure | `customfield_22912` | `Check logs in Sentinel. For all affected IPs the 'DeviceAction' value must be 'Deny'` |
+| Test reference | `customfield_22913` | `OPSLSY-37786` |
+| Owner | `customfield_12707` | `{ "name": "u464549" }` (param `ChangeOwnerName`) |
+| Change manager | `customfield_22914` | `{ "name": "u761051" }` (Emil Pollak, param `ChangeManagerName`) |
+| Assignee | `assignee` | `{ "name": "u464549" }` (param `ChangeAssigneeName`) |
+| Affected item | `customfield_24305` | `[ { "key": "LCJ-37462" } ]` (param `AffectedItemKey`) |
+
+Project = `OPSLSY` (`JiraProjectKey`), issuetype id = `13507` Technical change
+(`JiraIssueTypeId`).
+
+#### `customfield_24305` (Affected item) — write shape
+
+`customfield_24305` is an Elements Connect `rlabs-customfield-default-object` field
+and is **required** to pass the `Start implementation` transition. Its REST *write*
+shape differs from its read shape — the read form `["…(LCJ-37462)"]` returns
+`expected Object` on write. The playbook uses the object form with the key `LCJ-37462`:
+
+```json
+"customfield_24305": [ { "key": "LCJ-37462" } ]
+```
+
+> ⚠ **Not yet confirmed against a live Trackspace PUT/POST (204).** This is the most
+> likely of the two candidate shapes; the alternative is `["LCJ-37462"]`. Confirm by
+> PUT-ing each shape onto a non-closed test Technical change, keep whichever returns
+> 204, and update both `playbook/workflow.json` and this section. The value is held as
+> the single named constant `AffectedItemKey`.
+
+### Description body
+
+```
+*GOAL:* Block suspicious/malicious IPs maked by Microsoft Sentinel Threat Intelligence
+*Root-cause:* Several Sentinel alert created indicating there are communication with these IPs.
+*Time frame:* in optimal case approximately 5 minutes
+*Accurate start time:* {plannedStart}
+*Accurate finish time:* {plannedEnd}
+*Affected Service:* Palo Alto Fws
+*Impact:* Not expected.
+*Tested:* OPSLSY-37786
+*Communicate and contact:* LSYH, BUD NETOPS and LSYH, BUD SECOPS
+*Rollback:* Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs
+
+Blocked IPs can be found in the attachment.
+```
+
+(The `Time frame` line was changed 30 → 5 minutes to match the planned window.)
+
+---
+
+## The walk (name-driven, id-agnostic)
+
+Each step re-probes `GET /issue/{key}/transitions?expand=transitions.fields` and picks
+the transition whose `to.name` (case-insensitive substring) matches the next desired
+status, **skipping** any transition whose `name` contains `revoke / withdraw / re-plan
+/ reject / cancel / update cmdb`. Driving by **target status name** rather than
+hardcoded ids survives test↔prod id drift.
+
+After each POST the playbook **polls** `GET /issue/{key}?fields=status` in an `Until`
+(10 s delay, cap 60×/PT10M) until the status lands, rather than trusting the POST
+response — heavy Trackspace transitions often drop the connection but still commit, so
+each `Wait_Until_*_Landed` runs even when its POST is reported `Failed`/`TimedOut`.
+
+Discovered ids on the test env (reference only — not hardcoded): Open→Planning `11`,
+Planning→Implementation `171`, Implementation→Post implementation review `91`, Post
+implementation review→Closed `111`. Standard Change skips the approval stages.
+
+### Per-transition payloads
+
+| Walk step | target status | POST body fields |
+|---|---|---|
+| 1. Planning | `Planning` | *(none — just `transition.id`)* |
+| 2. Implementation | `Implementation` | *(none — clone already carries Category/Type/Reason/Impact/Risk/Owner/Affected item/Change manager/Change tested/Rollback/Validation, so the screen + validators are satisfied)* |
+| 3. Post implementation review | `Post implementation review` | `resolution = { "name": "Successful" }`, `customfield_23600 = actualStart`, `customfield_23601 = actualFinish` *(actual start/finish are only settable on this transition screen, not at create)* |
+| 4. Closed | `Closed` | `resolution = { "name": "Successful" }` |
+
+The close poll stops when the status name contains `Closed` **or** its
+`statusCategory.key` is `done`.
+
+---
+
+## The implementation work (ticket in Implementation)
+
+Unchanged from the previous flow except that it is now **ungated** and wrapped so an
+AbuseIPDB outage falls back instead of aborting:
+
+- **Healthy AbuseIPDB** (`AbuseIPDB_health_check` against `8.8.8.8` succeeds) →
+  `Enrichment_Scope`: per-IP `/check` (50-way Foreach), keep rows with
+  `totalReports >= MinReports` whose ISP is not in `ExcludedISPs` (lower-case
+  substring match), then set `Block_IPs` = kept IP list and `CSV_Rows` = the rich kept
+  rows.
+- **AbuseIPDB down** (`AbuseIPDB_health_check` Failed/TimedOut/Skipped) →
+  `Fallback_Build_Raw_IPs`: **no separate ticket** — the change already exists and is in
+  Implementation. Set `Block_IPs` and `CSV_Rows` from the **raw, un-enriched** incident
+  IP list (`Entities - Get IPs`). The change is still attached-to and closed, so it is
+  never stranded in Implementation.
+- **Blocklist blob write is ungated** (`Write_Blocklist_Blob`): GET
+  `$web/index.html`, line-level dedupe `Block_IPs` against existing content, and if
+  anything is new, PUT the appended blob (managed identity, `text/html`). This is the
+  actual change being implemented and happens regardless of approval (there is none).
+- **CSV** (`Build_CSV`, Table/CSV from `CSV_Rows`) is attached to the change via
+  `POST /issue/{key}/attachments` with `X-Atlassian-Token: no-check` and multipart
+  `file=` — the same artifact the old flow built.
+
+There is no longer an "empty result → terminate" branch: even with zero kept IPs the
+change is attached-to and walked to Closed so it never stalls. **No comments are
+written back to the Sentinel incident** at any point.
+
+---
+
+## Parameters
+
+Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
+`azuredeploy.json`):
+
+| Parameter | Default |
+|---|---|
+| `JiraProjectKey` | `OPSLSY` |
+| `JiraIssueTypeId` | `13507` (Technical change) |
+| `StatusPlanningName` | `Planning` |
+| `StatusImplementationName` | `Implementation` |
+| `StatusPostImplReviewName` | `Post implementation review` |
+| `JiraClosedStatusName` | `Closed` |
+| `ChangeOwnerName` / `ChangeAssigneeName` | `u464549` |
+| `ChangeManagerName` | `u761051` (Emil Pollak) |
+| `AffectedItemKey` | `LCJ-37462` |
+| `MinReports` | `100` |
+| `ExcludedISPs` | `["akamai technologies","google","palo alto networks","the shadowserver foundation","censys"]` |
+| `StorageAccountName` / `BlocklistContainer` / `BlocklistBlobPath` | `lsyweuritcsprdmspalo001` / `$web` / `index.html` |
+
+---
+
+## Deploy
+
+The ARM deploy **must pass `PlaybookName=TI-handler` explicitly** (the
+`azuredeploy.parameters.json` value), otherwise the stale template name
+`Sentinel-IPAbuse-TriageAndBlock` would stand up a *parallel* Logic App with a fresh
+managed identity instead of updating this one.
+
+```bash
+RG=LSY_WEUR_ITCS_PRD_SEC_RG_002
+az deployment group create \
+  --resource-group "$RG" \
+  --template-file playbook/azuredeploy.json \
+  --parameters @playbook/azuredeploy.parameters.json
+```
+
+Managed-identity RBAC (unchanged): Microsoft Sentinel Responder on the workspace,
+Key Vault Secrets User on the Key Vault, Storage Blob Data Contributor on the
+blocklist storage account. KV/Sentinel/AbuseIPDB connection wiring is unchanged.
+
+Logic App runs are immutable: after a redeploy, cancel any stuck in-flight runs and
+fire fresh ones — do not expect a redeploy to mutate a run already in progress.
+
+### Sync / acceptance
+
+- `jq -S` of `.definition.actions` and `.definition.triggers` matches between
+  `workflow.json` and the `azuredeploy.json` definition. The remaining `jq -S` diff
+  between the two files is only the parameter `defaultValue`s (literals in
+  `workflow.json` vs `[parameters('…')]` in ARM) — benign and expected.
+- A test run creates one OPSLSY Technical change, advances it to **Implementation at
+  run start**, runs enrichment + the blob write, attaches the CSV, then walks it to
+  **Closed** with resolution **Successful** — no CLOPSSEC artifacts, no Sentinel
+  incident comments. On an AbuseIPDB outage the same change still reaches Closed with
+  the raw-IP CSV attached.
