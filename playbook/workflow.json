@@ -73,11 +73,11 @@
             "Compute_Run_Times": {
                 "type": "Compose",
                 "inputs": {
-                    "plannedStart": "@{concat(formatDateTime(outputs('Capture_Run_Start'), 'yyyy-MM-dd'), 'T', formatDateTime(outputs('Capture_Run_Start'), 'HH:mm:ss'), '.000+0000')}",
-                    "plannedEnd": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'HH:mm:ss'), '.000+0000')}",
+                    "plannedStart": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 20), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 20), 'HH:mm:ss'), '.000+0000')}",
+                    "plannedEnd": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 25), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 25), 'HH:mm:ss'), '.000+0000')}",
                     "dateStamp": "@{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}",
-                    "displayStart": "@{formatDateTime(outputs('Capture_Run_Start'), 'yyyy-MM-dd HH:mm')}",
-                    "displayFinish": "@{formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'yyyy-MM-dd HH:mm')}",
+                    "displayStart": "@{formatDateTime(addMinutes(outputs('Capture_Run_Start'), 20), 'yyyy-MM-dd HH:mm')}",
+                    "displayFinish": "@{formatDateTime(addMinutes(outputs('Capture_Run_Start'), 25), 'yyyy-MM-dd HH:mm')}",
                     "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
                 },
                 "runAfter": {
@@ -1064,39 +1064,6 @@
                             ]
                         }
                     },
-                    "Capture_Impl_Time": {
-                        "type": "Compose",
-                        "inputs": "@utcNow()",
-                        "runAfter": {
-                            "Guard_Transition_Implementation": [
-                                "Succeeded"
-                            ]
-                        }
-                    },
-                    "Set_Planned_Start": {
-                        "type": "SetVariable",
-                        "inputs": {
-                            "name": "Planned_Start",
-                            "value": "@{concat(formatDateTime(addMinutes(outputs('Capture_Impl_Time'), 20), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Impl_Time'), 20), 'HH:mm:ss'), '.000+0000')}"
-                        },
-                        "runAfter": {
-                            "Capture_Impl_Time": [
-                                "Succeeded"
-                            ]
-                        }
-                    },
-                    "Set_Planned_End": {
-                        "type": "SetVariable",
-                        "inputs": {
-                            "name": "Planned_End",
-                            "value": "@{concat(formatDateTime(addMinutes(outputs('Capture_Impl_Time'), 25), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Impl_Time'), 25), 'HH:mm:ss'), '.000+0000')}"
-                        },
-                        "runAfter": {
-                            "Set_Planned_Start": [
-                                "Succeeded"
-                            ]
-                        }
-                    },
                     "Post_Transition_Implementation": {
                         "type": "Http",
                         "inputs": {
@@ -1110,8 +1077,8 @@
                                     "id": "@{first(body('Filter_Transition_Implementation'))?['id']}"
                                 },
                                 "fields": {
-                                    "customfield_22500": "@{variables('Planned_Start')}",
-                                    "customfield_22501": "@{variables('Planned_End')}"
+                                    "customfield_22500": "@{outputs('Compute_Run_Times')['plannedStart']}",
+                                    "customfield_22501": "@{outputs('Compute_Run_Times')['plannedEnd']}"
                                 }
                             },
                             "authentication": {
@@ -1121,7 +1088,7 @@
                             }
                         },
                         "runAfter": {
-                            "Set_Planned_End": [
+                            "Guard_Transition_Implementation": [
                                 "Succeeded"
                             ]
                         },
@@ -1992,8 +1959,8 @@
                                     "resolution": {
                                         "name": "Successful"
                                     },
-                                    "customfield_23600": "@{variables('Planned_Start')}",
-                                    "customfield_23601": "@{variables('Planned_End')}"
+                                    "customfield_23600": "@{outputs('Compute_Run_Times')['plannedStart']}",
+                                    "customfield_23601": "@{outputs('Compute_Run_Times')['plannedEnd']}"
                                 }
                             },
                             "authentication": {
@@ -2656,40 +2623,6 @@
                 },
                 "runAfter": {
                     "Walk_to_Post_Implementation_Review": [
-                        "Succeeded"
-                    ]
-                }
-            },
-            "Initialize_Planned_Start": {
-                "type": "InitializeVariable",
-                "inputs": {
-                    "variables": [
-                        {
-                            "name": "Planned_Start",
-                            "type": "string",
-                            "value": ""
-                        }
-                    ]
-                },
-                "runAfter": {
-                    "Initialize_Clone_Key": [
-                        "Succeeded"
-                    ]
-                }
-            },
-            "Initialize_Planned_End": {
-                "type": "InitializeVariable",
-                "inputs": {
-                    "variables": [
-                        {
-                            "name": "Planned_End",
-                            "type": "string",
-                            "value": ""
-                        }
-                    ]
-                },
-                "runAfter": {
-                    "Initialize_Planned_Start": [
                         "Succeeded"
                     ]
                 }

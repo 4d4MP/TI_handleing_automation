@@ -71,24 +71,26 @@ derives the rest so start/end are consistent. Timestamps are built with `concat`
 | Value | Expression | Example |
 |---|---|---|
 | `dateStamp` | `formatDateTime(start,'yyyy.MM.dd')` (for the summary) | `2026.06.12` |
-| `displayStart` | `formatDateTime(start,'yyyy-MM-dd HH:mm')` (for the description body) | `2026-06-12 19:33` |
-| `displayFinish` | same over `addMinutes(start,5)` | `2026-06-12 19:38` |
+| `plannedStart` | `concat(... addMinutes(start,20) ...)` → full ISO, **start +20 min** | `2026-06-12T09:50:00.000+0000` |
+| `plannedEnd` | same over `addMinutes(start,25)` → full ISO, **finish +25 min** | `2026-06-12T09:55:00.000+0000` |
+| `displayStart` | `formatDateTime(addMinutes(start,20),'yyyy-MM-dd HH:mm')` | `2026-06-12 09:50` |
+| `displayFinish` | `formatDateTime(addMinutes(start,25),'yyyy-MM-dd HH:mm')` | `2026-06-12 09:55` |
 | `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` | |
 
-The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC. The
-**description body** uses the human-readable `displayStart`/`displayFinish`
-(`yyyy-MM-dd HH:mm`), derived from run start.
+The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
 
-> **Planned/Actual dates are NOT taken from run start.** They are computed fresh at the
-> **Implementation transition** (`Capture_Impl_Time = utcNow()` there → `Planned_Start =
-> +20 min`, `Planned_End = +25 min`, full ISO via `concat`) and stored in the
-> `Planned_Start`/`Planned_End` variables, because the *Start implementation* validator
-> rejects a past Planned start and the run-start value is already stale by then. Those
-> variables feed `customfield_22500`/`22501` at the Implementation hop and
-> `customfield_23600`/`23601` (actuals) at the PIR hop. The description's
-> `displayStart`/`displayFinish` are still run-start-based, so they can read 1–3 min
-> earlier than the Planned start field — an accepted cosmetic skew, since the description
-> is written (at the Override step) before the Implementation hop computes the real value.
+> **All six time fields share one source — run start + 20 min (start) / + 25 min (finish).**
+> `Compute_Run_Times` produces the start time in two formats: full ISO (`plannedStart`/
+> `plannedEnd`, for the Jira datetime fields) and `yyyy-MM-dd HH:mm` (`displayStart`/
+> `displayFinish`, for the description). Those exact values populate **all six** date
+> fields identically: description *Accurate start/finish*, Planned start/end
+> (`customfield_22500`/`22501`, set on the Override PUT **and** re-affirmed on the
+> Implementation transition), and Actual start/finish (`customfield_23600`/`23601`, on the
+> PIR transition). The **+20 min** offset is the safety margin: the *Start implementation*
+> validator rejects a past Planned start, and +20 from run start stays comfortably in the
+> future by the time the walk reaches that hop (which is only a few minutes in). No
+> per-hop recomputation and no `Planned_*` variables — one base instant, used everywhere,
+> so planned, actual, and the human-readable description never disagree.
 
 ### Clone mechanism (headless, confirmed working)
 
@@ -132,11 +134,11 @@ The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC. The
 
 The clone copies the template's old body/dates, so `Override_Clone_Fields`
 (`PUT /rest/api/2/issue/{Clone_Key}`) overrides the `description` (body below, with the
-Accurate start/finish lines from `displayStart`/`displayFinish`) and sets initial
-`customfield_22500`/`22501` (Planned start/end) from the run-start `plannedStart`/`plannedEnd`.
-**Those Planned dates are placeholders** — they are re-set to future values
-(`utcNow()+20m`/`+25m`) at the Implementation transition, where the *Start implementation*
-validator enforces a non-past Planned start. The **summary** is already correct from the
+Accurate start/finish lines from `displayStart`/`displayFinish`) and sets
+`customfield_22500`/`22501` (Planned start/end) from `plannedStart`/`plannedEnd`
+(run start +20/+25). The Implementation transition re-sends the **same** `plannedStart`/
+`plannedEnd` (to satisfy the *Start implementation* non-past validator at transition time),
+so the value is identical in both places. The **summary** is already correct from the
 clone. Everything else — Category, Type, Reason, Impact, Risk, Owner, Change manager,
 Change tested, Rollback, Validation, **Affected item** — is inherited from the template and
 left untouched.
@@ -197,8 +199,8 @@ implementation review→Closed `111`. Standard Change skips the approval stages.
 | Walk step | target status | POST body fields |
 |---|---|---|
 | 1. Planning | `Planning` | *(none — just `transition.id`)* |
-| 2. Implementation | `Implementation` | `customfield_22500 = Planned_Start`, `customfield_22501 = Planned_End` — **the planned dates are (re)set here, at transition time**, to `utcNow()+20m` / `utcNow()+25m`. The *Start implementation* validator rejects a **past** Planned start, and the run-start value is 1–3 min stale by the time the walk reaches this hop; computing them here (with a +20 min buffer) guarantees they are in the future. The two values are captured into the `Planned_Start`/`Planned_End` variables so the PIR step can reuse them as actuals. |
-| 3. Post implementation review | `Post implementation review` | `resolution = { "name": "Successful" }`, `customfield_23600 = Planned_Start`, `customfield_23601 = Planned_End` (Actual start/finish = the same values set at the Implementation hop; only settable on this transition screen) |
+| 2. Implementation | `Implementation` | `customfield_22500 = plannedStart`, `customfield_22501 = plannedEnd` (run start +20/+25) — re-sent on the transition so the *Start implementation* validator sees a non-past Planned start. The +20 min offset keeps it in the future even after the few minutes the walk takes to reach this hop. |
+| 3. Post implementation review | `Post implementation review` | `resolution = { "name": "Successful" }`, `customfield_23600 = plannedStart`, `customfield_23601 = plannedEnd` (Actual start/finish = the **same** +20/+25 values; only settable on this transition screen) |
 | 4. Closed | `Closed` | `resolution = { "name": "Successful" }` |
 
 The close poll stops when the status name contains `Closed` **or** its
