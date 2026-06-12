@@ -149,44 +149,7 @@
                             },
                             "issuetype": {
                                 "id": "@{parameters('JiraIssueTypeId')}"
-                            },
-                            "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{outputs('Compute_Run_Times')['dateStamp']}",
-                            "description": "*GOAL:* Block suspicious/malicious IPs maked by Microsoft Sentinel Threat Intelligence\n*Root-cause:* Several Sentinel alert created indicating there are communication with these IPs.\n*Time frame:* in optimal case approximately 5 minutes\n*Accurate start time:* @{outputs('Compute_Run_Times')['plannedStart']}\n*Accurate finish time:* @{outputs('Compute_Run_Times')['plannedEnd']}\n*Affected Service:* Palo Alto Fws\n*Impact:* Not expected.\n*Tested:* OPSLSY-37786\n*Communicate and contact:* LSYH, BUD NETOPS and LSYH, BUD SECOPS\n*Rollback:* Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs\n\nBlocked IPs can be found in the attachment.",
-                            "customfield_22500": "@{outputs('Compute_Run_Times')['plannedStart']}",
-                            "customfield_22501": "@{outputs('Compute_Run_Times')['plannedEnd']}",
-                            "customfield_10905": {
-                                "id": "36466"
-                            },
-                            "customfield_20619": {
-                                "id": "36471"
-                            },
-                            "customfield_10401": {
-                                "id": "40640"
-                            },
-                            "customfield_16205": {
-                                "id": "40636"
-                            },
-                            "customfield_11417": "Several Sentinel alert created indicating there are communication with these IPs.",
-                            "customfield_22909": {
-                                "id": "32368"
-                            },
-                            "customfield_22222": "Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs",
-                            "customfield_22912": "Check logs in Sentinel. For all affected IPs the 'DeviceAction' value must be 'Deny'",
-                            "customfield_22913": "OPSLSY-37786",
-                            "customfield_12707": {
-                                "name": "@{parameters('ChangeOwnerName')}"
-                            },
-                            "customfield_22914": {
-                                "name": "@{parameters('ChangeManagerName')}"
-                            },
-                            "assignee": {
-                                "name": "@{parameters('ChangeAssigneeName')}"
-                            },
-                            "customfield_24305": [
-                                {
-                                    "key": "@{parameters('AffectedItemKey')}"
-                                }
-                            ]
+                            }
                         }
                     },
                     "authentication": {
@@ -234,6 +197,69 @@
                     "Create_OPSLSY_Change": [
                         "Succeeded"
                     ]
+                }
+            },
+            "Update_OPSLSY_Change": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                    "method": "PUT",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "body": {
+                        "fields": {
+                            "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{outputs('Compute_Run_Times')['dateStamp']}",
+                            "description": "*GOAL:* Block suspicious/malicious IPs maked by Microsoft Sentinel Threat Intelligence\n*Root-cause:* Several Sentinel alert created indicating there are communication with these IPs.\n*Time frame:* in optimal case approximately 5 minutes\n*Accurate start time:* @{outputs('Compute_Run_Times')['plannedStart']}\n*Accurate finish time:* @{outputs('Compute_Run_Times')['plannedEnd']}\n*Affected Service:* Palo Alto Fws\n*Impact:* Not expected.\n*Tested:* OPSLSY-37786\n*Communicate and contact:* LSYH, BUD NETOPS and LSYH, BUD SECOPS\n*Rollback:* Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs\n\nBlocked IPs can be found in the attachment.",
+                            "customfield_22500": "@{outputs('Compute_Run_Times')['plannedStart']}",
+                            "customfield_22501": "@{outputs('Compute_Run_Times')['plannedEnd']}",
+                            "customfield_10905": {
+                                "id": "36466"
+                            },
+                            "customfield_20619": {
+                                "id": "36471"
+                            },
+                            "customfield_10401": {
+                                "id": "40640"
+                            },
+                            "customfield_16205": {
+                                "id": "40636"
+                            },
+                            "customfield_11417": "Several Sentinel alert created indicating there are communication with these IPs.",
+                            "customfield_22909": {
+                                "id": "32368"
+                            },
+                            "customfield_22222": "Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs",
+                            "customfield_22912": "Check logs in Sentinel. For all affected IPs the 'DeviceAction' value must be 'Deny'",
+                            "customfield_22913": "OPSLSY-37786",
+                            "customfield_12707": {
+                                "name": "@{parameters('ChangeOwnerName')}"
+                            },
+                            "customfield_22914": {
+                                "name": "@{parameters('ChangeManagerName')}"
+                            },
+                            "assignee": {
+                                "name": "@{parameters('ChangeAssigneeName')}"
+                            }
+                        }
+                    },
+                    "authentication": {
+                        "type": "Basic",
+                        "username": "@parameters('JIRAUserName')",
+                        "password": "@body('Get_Jira_password')?['value']"
+                    }
+                },
+                "runAfter": {
+                    "Parse_Create_Body": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "inputs"
+                        ]
+                    }
                 }
             },
             "Walk_to_Planning": {
@@ -449,7 +475,7 @@
                     }
                 },
                 "runAfter": {
-                    "Parse_Create_Body": [
+                    "Update_OPSLSY_Change": [
                         "Succeeded"
                     ]
                 }
@@ -547,6 +573,13 @@
                             "body": {
                                 "transition": {
                                     "id": "@{first(body('Filter_Transition_Implementation'))?['id']}"
+                                },
+                                "fields": {
+                                    "customfield_24305": [
+                                        {
+                                            "key": "@{parameters('AffectedItemKey')}"
+                                        }
+                                    ]
                                 }
                             },
                             "authentication": {
