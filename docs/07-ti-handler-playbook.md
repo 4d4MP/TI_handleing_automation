@@ -107,23 +107,30 @@ Project = `OPSLSY` (`JiraProjectKey`), issuetype id = `13507` Technical change
 > screen via `GET /rest/api/2/issue/createmeta?projectKeys=OPSLSY&issuetypeIds=13507&expand=projects.issuetypes.fields`),
 > not as a reason to move fields off create.
 
-#### `customfield_24305` (Affected item) — write shape
+#### `customfield_24305` (Affected item) — confirmed write shape
 
-`customfield_24305` is an Elements Connect `rlabs-customfield-default-object` field and is
-**required on the create screen** (and is what the `Start implementation` transition
-validator checks — already satisfied once set at create, so it is **not** re-sent on the
-transition). Its REST *write* shape differs from its read shape — the read form
-`["…(LCJ-37462)"]` returns `expected Object` on write — so the object form with the key
-`LCJ-37462` is used, held as the single named constant `AffectedItemKey`:
+`customfield_24305` is a Riada **Insight/Assets** field
+(`com.riadalabs.jira.plugins.insight:rlabs-customfield-default-object`), **required on the
+create screen** (and the field the `Start implementation` transition validator checks —
+already satisfied once set at create, so it is **not** re-sent on the transition). Its
+write shape is an **array of objects referenced by Assets `objectKey`**, confirmed with a
+live `204` write-probe:
 
 ```json
 "customfield_24305": [ { "key": "LCJ-37462" } ]
 ```
 
-> ⚠ **Write-shape not yet confirmed against a live 201.** This is the more likely of the
-> two candidates; the alternative is `["LCJ-37462"]`. If create returns
-> `data was not an object` / `expected Object` for `customfield_24305`, switch
-> `AffectedItemKey`'s usage to the bare-string array form and update this section.
+The key in the read form's parentheses (`"… (LCJ-37462)"`) **is** the `objectKey` — the
+bare-string array `["LCJ-37462"]` is the *read* form and is rejected on write
+(`expected Object`). The value is held as the single named constant `AffectedItemKey`.
+
+`LCJ-37462` is the **prod** object *"PS_SHARED_ITCSIAAS_PROD_LSY NET - CLOPS Palo Alto"*,
+read from the prod template `OPSLSY-75376`. **Assets keys are environment-specific** — a
+prod key does not resolve in int and vice-versa. If a create fails with
+`Could not find Assets object/s (<key>)`, you are pointing at the wrong environment for
+that key (e.g. running the prod key against int); override `AffectedItemKey` with that
+environment's objectKey, or re-read the relevant template's `customfield_24305`. For the
+prod `TI-handler` the value above is correct.
 
 ### Description body
 

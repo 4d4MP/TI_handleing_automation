@@ -122,7 +122,7 @@
             "type": "string",
             "defaultValue": "LCJ-37462",
             "metadata": {
-                "description": "Elements Connect object key for the Affected item (customfield_24305), required to pass the Start implementation transition. Written as [{ \"key\": \"<this>\" }]."
+                "description": "Riada Insight/Assets objectKey for the Affected item (customfield_24305), required on the create screen. Written as [{ \"key\": \"<this>\" }] (confirmed 204). Assets keys are environment-specific; LCJ-37462 is the prod object 'PS_SHARED_ITCSIAAS_PROD_LSY NET - CLOPS Palo Alto'. Override per environment if 'Could not find Assets object/s' is returned."
             }
         },
         "StorageAccountName": {
