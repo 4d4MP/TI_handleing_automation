@@ -23,8 +23,8 @@
         "JiraProjectKey": {
             "value": "OPSLSY"
         },
-        "JiraIssueTypeId": {
-            "value": "13507"
+        "TemplateIssueKey": {
+            "value": "OPSLSY-75376"
         },
         "StatusPlanningName": {
             "value": "Planning"
@@ -37,18 +37,6 @@
         },
         "JiraClosedStatusName": {
             "value": "Closed"
-        },
-        "ChangeOwnerName": {
-            "value": "u464549"
-        },
-        "ChangeAssigneeName": {
-            "value": "u464549"
-        },
-        "ChangeManagerName": {
-            "value": "u761051"
-        },
-        "AffectedItemKey": {
-            "value": "LCJ-37462"
         },
         "StorageAccountName": {
             "value": "lsyweuritcsprdmspalo001"

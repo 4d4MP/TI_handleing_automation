@@ -20,11 +20,13 @@ Sentinel incident trigger
   │
   ├─► Entities - Get IPs          (Sentinel connector)
   ├─► Get_Jira_password           (Key Vault, secureData)
-  ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart, plannedEnd=+5m, dateStamp)
-  ├─► Initialize Excluded_IPs / Block_IPs / CSV_Rows  (root-level variables)
+  ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart, plannedEnd=+5m, dateStamp, marker, summary)
+  ├─► Initialize Excluded_IPs / Block_IPs / CSV_Rows / Clone_Key  (root-level variables)
   │
-  ├─► Create_OPSLSY_Change        (POST /rest/api/2/issue, Basic auth, fields whitelist)
-  ├─► Parse_Create_Body           (→ issue key)
+  ├─► Resolve_Template_Id          (GET issue/OPSLSY-75376?fields=id) → Parse_Template_Id
+  ├─► Clone_OPSLSY_Change          (POST /secure/CloneIssueDetails.jspa, Basic + X-Atlassian-Token:no-check)
+  ├─► Find_Clone_Key (Until)       (poll GET /search?jql=summary~marker → set Clone_Key)
+  ├─► Override_Clone_Fields        (PUT issue/{Clone_Key}: description + planned start/end)
   ├─► Walk_to_Planning            (re-probe transitions → POST → poll until landed)
   ├─► Walk_to_Implementation      (re-probe transitions → POST → poll until landed)
   │
@@ -74,15 +76,15 @@ The managed identity does **not** need any permission on the AbuseIPDB connectio
 
 ## The change ticket — OPSLSY Technical change
 
-`OPSLSY-75376` is the field-rich template. The playbook does **not** call a clone endpoint; it `POST /issue` (`Create_OPSLSY_Change`) setting the field whitelist directly. The OPSLSY / `13507` **create screen requires** summary, description, planned start/end, category, type, impact, risk, reason, owner, and the Affected item, so all of them are set on create (a bare `project`+`issuetype` create is rejected `400 … is required`). Computed/scripted template fields are not copied. Full field table and the description body are in `docs/07-ti-handler-playbook.md`.
+The ticket is produced by a **server-side clone** of the template `OPSLSY-75376`, not by `POST /issue`. The reason is `customfield_24305` (**Affected item**): a Riada Insight/Assets object field whose Provider Service object (`LCJ-37462`) is outside the field's REST key-resolver scope, so it **cannot be set via any REST write shape** (`{"key":…}` → "Could not find"; id/string forms → silently ignored → "required") — yet it is required to pass `Start implementation`. A clone copies the Assets value (and every other change field) intact. Flow: `Resolve_Template_Id` (GET the template's numeric id) → `Clone_OPSLSY_Change` (`POST /secure/CloneIssueDetails.jspa`, form-encoded, Basic auth + `X-Atlassian-Token: no-check`, `cloneAttachments/SubTasks/Links=false`) → `Find_Clone_Key` (the clone is async, so poll `GET /search` for the unique summary `marker` and capture the new key in the `Clone_Key` variable) → `Override_Clone_Fields` (`PUT` description + planned start/end while Open; summary was set by the clone). Full detail in `docs/07-ti-handler-playbook.md`.
 
-The **Affected item** `customfield_24305` (Elements Connect object) is required on the create screen — and is the field the *Start implementation* transition validator checks, already satisfied once set at create — so it is sent at create as `[ { "key": "LCJ-37462" } ]` and not re-sent on the transition (see the doc for the unconfirmed-shape note).
+Everything else — Category, Type, Reason, Impact, Risk, Owner, Change manager, Change tested, Rollback, Validation, and the **Affected item** — is inherited from the template clone and never set by the playbook.
 
 ### The walk (name-driven)
 
 The transition ids are per-workflow and drift between test and prod, so the walk never hardcodes them. At each step it `GET`s `/issue/{key}/transitions?expand=transitions.fields`, filters to the transition whose `to.name` contains the desired status name (case-insensitive) **and** whose `name` does not contain `revoke / withdraw / re-plan / reject / cancel / update cmdb`, then `POST`s `{transition:{id}, fields:{…}}`. Because heavy Trackspace transitions often drop the HTTP connection but still commit, each step then **polls** `GET /issue/{key}?fields=status` in an `Until` (10 s × up to 60 / PT10M) until the status lands, and the poll runs even if the POST is reported `Failed`/`TimedOut`.
 
-Per-transition `fields`: Planning and Implementation send none (the create already populated the fields their screens/validators need, including the Affected item); Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` = actual start/finish (only settable on that screen); Closed sends `resolution=Successful`.
+Per-transition `fields`: Planning and Implementation send none (the clone already carries the fields their screens/validators need, including the Affected item); Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` = actual start/finish (only settable on that screen); Closed sends `resolution=Successful`.
 
 ## Filter semantics
 

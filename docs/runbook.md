@@ -22,9 +22,9 @@ OPSLSY change (description, attachment, history) and/or inspect the blocklist bl
 ## Finding the change for an incident
 
 The change summary is `[TEST] - Block malicious/suspicious IPs reported by Microsoft
-Sentinel Threat Intelligence - {yyyy.MM.dd}`. The Logic App run history for `TI-handler`
-shows the created issue key in the `Create_OPSLSY_Change` / `Parse_Create_Body`
-actions. Open it in Trackspace:
+Sentinel Threat Intelligence - {yyyy.MM.dd} - SENTRUN{runId}`. The Logic App run history
+for `TI-handler` shows the cloned issue key in the `Find_Clone_Key` step (the `Clone_Key`
+variable). Open it in Trackspace:
 
 ```
 https://trackspace.lhsystems.com/browse/OPSLSY-<n>
@@ -99,9 +99,9 @@ re-runs idempotent. To avoid it entirely, switch `Update_blob` to use the `ETag`
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `AbuseIPDB_health_check` Failed/TimedOut | AbuseIPDB down or OMS connection auth expired | The run **does not abort** — it falls back to the raw incident IPs and still blocks + closes the change. If the connection auth expired, contact OMS to re-authorise the `abuseipdbapi` connector in `LSY_WEUR_ITCS_PRD_OMS_RG_001`. |
-| `Create_OPSLSY_Change` 401 | Trackspace password rotated | Update the `sentinelsvc` secret in KV. |
-| `Create_OPSLSY_Change` 400 with `issuetype`/field error | `JiraIssueTypeId`/project wrong, or a required field changed on the OPSLSY board | Confirm `JiraProjectKey=OPSLSY`, `JiraIssueTypeId=13507`, and the create whitelist still matches the board. |
-| Walk stalls / `Wait_Until_*_Landed` times out | No matching transition from the current status, or `customfield_24305` shape rejected at *Start implementation* | Check the change's available transitions and the `AffectedItemKey` write-shape (see `docs/07-ti-handler-playbook.md`). |
+| `Resolve_Template_Id` / `Clone_OPSLSY_Change` 401 | Trackspace password rotated | Update the `sentinelsvc` secret in KV. |
+| `Clone_OPSLSY_Change` fails / `Find_Clone_Key` times out | Template key wrong, or the clone servlet path/auth changed, or the summary marker isn't searchable yet | Confirm `TemplateIssueKey=OPSLSY-75376` resolves, that `/secure/CloneIssueDetails.jspa` accepts Basic + `X-Atlassian-Token: no-check`, and that JQL `summary ~ "<marker>"` returns the clone (Jira text index can lag a few seconds — the Until polls). |
+| Walk stalls / `Wait_Until_*_Landed` times out | No matching transition from the current status | Check the change's available transitions; the Affected item is inherited from the clone, so the *Start implementation* validator should already be satisfied. |
 | `Get_blob_content` 403 | Managed identity missing `Storage Blob Data Contributor` | Grant the role on the storage account. |
 | `Update_blob` 409 | Concurrent modification by another writer | Re-run the playbook; the dedupe skips already-present IPs. |
 
@@ -115,5 +115,4 @@ Parameters`) without redeploying ARM:
 | `MinReports` | `100` | Lower to be more aggressive, raise to be more conservative. |
 | `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` | Lower-case, matched as a **substring** of `toLower(isp)`. |
 | `StatusPlanningName` / `StatusImplementationName` / `StatusPostImplReviewName` / `JiraClosedStatusName` | `Planning` / `Implementation` / `Post implementation review` / `Closed` | Walk target status names, matched case-insensitively as a substring of a transition's target status. |
-| `ChangeOwnerName` / `ChangeAssigneeName` / `ChangeManagerName` | `u464549` / `u464549` / `u761051` | Trackspace user names set on the change. |
-| `AffectedItemKey` | `LCJ-37462` | Elements Connect object key for the Affected item (`customfield_24305`). |
+| `TemplateIssueKey` | `OPSLSY-75376` | The Technical change cloned each run. Carries the Insight/Assets Affected item and all other change fields. |

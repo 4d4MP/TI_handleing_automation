@@ -75,7 +75,9 @@
                 "inputs": {
                     "plannedStart": "@{concat(formatDateTime(outputs('Capture_Run_Start'), 'yyyy-MM-dd'), 'T', formatDateTime(outputs('Capture_Run_Start'), 'HH:mm:ss'), '.000+0000')}",
                     "plannedEnd": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'HH:mm:ss'), '.000+0000')}",
-                    "dateStamp": "@{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
+                    "dateStamp": "@{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}",
+                    "marker": "@{concat('SENTRUN', workflow()['run']['name'])}",
+                    "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')} - SENTRUN@{workflow()['run']['name']}"
                 },
                 "runAfter": {
                     "Capture_Run_Start": [
@@ -134,60 +136,30 @@
                     ]
                 }
             },
-            "Create_OPSLSY_Change": {
+            "Initialize_Clone_Key": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Clone_Key",
+                            "type": "string",
+                            "value": ""
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_CSV_Rows": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Resolve_Template_Id": {
                 "type": "Http",
                 "inputs": {
-                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
-                    "method": "POST",
-                    "headers": {
-                        "Content-Type": "application/json"
-                    },
-                    "body": {
-                        "fields": {
-                            "project": {
-                                "key": "@{parameters('JiraProjectKey')}"
-                            },
-                            "issuetype": {
-                                "id": "@{parameters('JiraIssueTypeId')}"
-                            },
-                            "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{outputs('Compute_Run_Times')['dateStamp']}",
-                            "description": "*GOAL:* Block suspicious/malicious IPs maked by Microsoft Sentinel Threat Intelligence\n*Root-cause:* Several Sentinel alert created indicating there are communication with these IPs.\n*Time frame:* in optimal case approximately 5 minutes\n*Accurate start time:* @{outputs('Compute_Run_Times')['plannedStart']}\n*Accurate finish time:* @{outputs('Compute_Run_Times')['plannedEnd']}\n*Affected Service:* Palo Alto Fws\n*Impact:* Not expected.\n*Tested:* OPSLSY-37786\n*Communicate and contact:* LSYH, BUD NETOPS and LSYH, BUD SECOPS\n*Rollback:* Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs\n\nBlocked IPs can be found in the attachment.",
-                            "customfield_22500": "@{outputs('Compute_Run_Times')['plannedStart']}",
-                            "customfield_22501": "@{outputs('Compute_Run_Times')['plannedEnd']}",
-                            "customfield_10905": {
-                                "id": "36466"
-                            },
-                            "customfield_20619": {
-                                "id": "36471"
-                            },
-                            "customfield_10401": {
-                                "id": "40640"
-                            },
-                            "customfield_16205": {
-                                "id": "40636"
-                            },
-                            "customfield_11417": "Several Sentinel alert created indicating there are communication with these IPs.",
-                            "customfield_22909": {
-                                "id": "32368"
-                            },
-                            "customfield_22222": "Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs",
-                            "customfield_22912": "Check logs in Sentinel. For all affected IPs the 'DeviceAction' value must be 'Deny'",
-                            "customfield_22913": "OPSLSY-37786",
-                            "customfield_12707": {
-                                "name": "@{parameters('ChangeOwnerName')}"
-                            },
-                            "customfield_22914": {
-                                "name": "@{parameters('ChangeManagerName')}"
-                            },
-                            "assignee": {
-                                "name": "@{parameters('ChangeAssigneeName')}"
-                            },
-                            "customfield_24305": [
-                                {
-                                    "key": "@{parameters('AffectedItemKey')}"
-                                }
-                            ]
-                        }
+                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{parameters('TemplateIssueKey')}",
+                    "method": "GET",
+                    "queries": {
+                        "fields": "id"
                     },
                     "authentication": {
                         "type": "Basic",
@@ -197,6 +169,57 @@
                 },
                 "runAfter": {
                     "Get_Jira_password": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "inputs"
+                        ]
+                    }
+                }
+            },
+            "Parse_Template_Id": {
+                "type": "ParseJson",
+                "inputs": {
+                    "content": "@body('Resolve_Template_Id')",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string"
+                            },
+                            "key": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Resolve_Template_Id": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Clone_OPSLSY_Change": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "@{parameters('JIRAHOST')}/secure/CloneIssueDetails.jspa",
+                    "method": "POST",
+                    "headers": {
+                        "X-Atlassian-Token": "no-check",
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    },
+                    "body": "id=@{body('Parse_Template_Id')?['id']}&summary=@{encodeUriComponent(outputs('Compute_Run_Times')['summary'])}&cloneAttachments=false&cloneSubTasks=false&cloneLinks=false",
+                    "authentication": {
+                        "type": "Basic",
+                        "username": "@parameters('JIRAUserName')",
+                        "password": "@body('Get_Jira_password')?['value']"
+                    }
+                },
+                "runAfter": {
+                    "Parse_Template_Id": [
                         "Succeeded"
                     ],
                     "Compute_Run_Times": [
@@ -211,29 +234,146 @@
                     }
                 }
             },
-            "Parse_Create_Body": {
-                "type": "ParseJson",
-                "inputs": {
-                    "content": "@body('Create_OPSLSY_Change')",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "id": {
-                                "type": "string"
-                            },
-                            "key": {
-                                "type": "string"
-                            },
-                            "self": {
-                                "type": "string"
+            "Find_Clone_Key": {
+                "type": "Until",
+                "expression": "@not(equals(variables('Clone_Key'), ''))",
+                "limit": {
+                    "count": 30,
+                    "timeout": "PT5M"
+                },
+                "actions": {
+                    "Delay_Find_Clone": {
+                        "type": "Wait",
+                        "inputs": {
+                            "interval": {
+                                "count": 10,
+                                "unit": "Second"
                             }
+                        },
+                        "runAfter": {}
+                    },
+                    "Search_For_Clone": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/search",
+                            "method": "GET",
+                            "queries": {
+                                "jql": "project = @{parameters('JiraProjectKey')} AND summary ~ \"@{outputs('Compute_Run_Times')['marker']}\" ORDER BY created DESC",
+                                "maxResults": 1,
+                                "fields": "key"
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {
+                            "Delay_Find_Clone": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Parse_Search": {
+                        "type": "ParseJson",
+                        "inputs": {
+                            "content": "@body('Search_For_Clone')",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "issues": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "key": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "runAfter": {
+                            "Search_For_Clone": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Set_Clone_Key_If_Found": {
+                        "type": "If",
+                        "expression": {
+                            "greater": [
+                                "@length(coalesce(body('Parse_Search')?['issues'], json('[]')))",
+                                0
+                            ]
+                        },
+                        "actions": {
+                            "Set_Clone_Key": {
+                                "type": "SetVariable",
+                                "inputs": {
+                                    "name": "Clone_Key",
+                                    "value": "@{first(body('Parse_Search')?['issues'])?['key']}"
+                                },
+                                "runAfter": {}
+                            }
+                        },
+                        "else": {
+                            "actions": {}
+                        },
+                        "runAfter": {
+                            "Parse_Search": [
+                                "Succeeded"
+                            ]
                         }
                     }
                 },
                 "runAfter": {
-                    "Create_OPSLSY_Change": [
+                    "Clone_OPSLSY_Change": [
                         "Succeeded"
                     ]
+                }
+            },
+            "Override_Clone_Fields": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                    "method": "PUT",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "body": {
+                        "fields": {
+                            "description": "*GOAL:* Block suspicious/malicious IPs maked by Microsoft Sentinel Threat Intelligence\n*Root-cause:* Several Sentinel alert created indicating there are communication with these IPs.\n*Time frame:* in optimal case approximately 5 minutes\n*Accurate start time:* @{outputs('Compute_Run_Times')['plannedStart']}\n*Accurate finish time:* @{outputs('Compute_Run_Times')['plannedEnd']}\n*Affected Service:* Palo Alto Fws\n*Impact:* Not expected.\n*Tested:* OPSLSY-37786\n*Communicate and contact:* LSYH, BUD NETOPS and LSYH, BUD SECOPS\n*Rollback:* Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs\n\nBlocked IPs can be found in the attachment.",
+                            "customfield_22500": "@{outputs('Compute_Run_Times')['plannedStart']}",
+                            "customfield_22501": "@{outputs('Compute_Run_Times')['plannedEnd']}"
+                        }
+                    },
+                    "authentication": {
+                        "type": "Basic",
+                        "username": "@parameters('JIRAUserName')",
+                        "password": "@body('Get_Jira_password')?['value']"
+                    }
+                },
+                "runAfter": {
+                    "Find_Clone_Key": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "inputs"
+                        ]
+                    }
                 }
             },
             "Walk_to_Planning": {
@@ -242,7 +382,7 @@
                     "Get_Transitions_Planning": {
                         "type": "Http",
                         "inputs": {
-                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "GET",
                             "queries": {
                                 "expand": "transitions.fields"
@@ -321,7 +461,7 @@
                     "Post_Transition_Planning": {
                         "type": "Http",
                         "inputs": {
-                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "POST",
                             "headers": {
                                 "Content-Type": "application/json"
@@ -371,7 +511,7 @@
                             "Get_Status_Planning": {
                                 "type": "Http",
                                 "inputs": {
-                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
                                     "method": "GET",
                                     "queries": {
                                         "fields": "status"
@@ -449,7 +589,7 @@
                     }
                 },
                 "runAfter": {
-                    "Parse_Create_Body": [
+                    "Override_Clone_Fields": [
                         "Succeeded"
                     ]
                 }
@@ -460,7 +600,7 @@
                     "Get_Transitions_Implementation": {
                         "type": "Http",
                         "inputs": {
-                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "GET",
                             "queries": {
                                 "expand": "transitions.fields"
@@ -539,7 +679,7 @@
                     "Post_Transition_Implementation": {
                         "type": "Http",
                         "inputs": {
-                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "POST",
                             "headers": {
                                 "Content-Type": "application/json"
@@ -589,7 +729,7 @@
                             "Get_Status_Implementation": {
                                 "type": "Http",
                                 "inputs": {
-                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
                                     "method": "GET",
                                     "queries": {
                                         "fields": "status"
@@ -1084,7 +1224,7 @@
             "Attach_CSV_to_Jira": {
                 "type": "Http",
                 "inputs": {
-                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/attachments",
+                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/attachments",
                     "method": "POST",
                     "headers": {
                         "X-Atlassian-Token": "no-check"
@@ -1126,7 +1266,7 @@
                     "Get_Transitions_PIR": {
                         "type": "Http",
                         "inputs": {
-                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "GET",
                             "queries": {
                                 "expand": "transitions.fields"
@@ -1205,7 +1345,7 @@
                     "Post_Transition_PIR": {
                         "type": "Http",
                         "inputs": {
-                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "POST",
                             "headers": {
                                 "Content-Type": "application/json"
@@ -1262,7 +1402,7 @@
                             "Get_Status_PIR": {
                                 "type": "Http",
                                 "inputs": {
-                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
                                     "method": "GET",
                                     "queries": {
                                         "fields": "status"
@@ -1351,7 +1491,7 @@
                     "Get_Transitions_Closed": {
                         "type": "Http",
                         "inputs": {
-                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "GET",
                             "queries": {
                                 "expand": "transitions.fields"
@@ -1430,7 +1570,7 @@
                     "Post_Transition_Closed": {
                         "type": "Http",
                         "inputs": {
-                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}/transitions",
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "POST",
                             "headers": {
                                 "Content-Type": "application/json"
@@ -1485,7 +1625,7 @@
                             "Get_Status_Closed": {
                                 "type": "Http",
                                 "inputs": {
-                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{body('Parse_Create_Body')?['key']}",
+                                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
                                     "method": "GET",
                                     "queries": {
                                         "fields": "status"
@@ -1587,8 +1727,8 @@
                 "defaultValue": "OPSLSY",
                 "type": "String"
             },
-            "JiraIssueTypeId": {
-                "defaultValue": "13507",
+            "TemplateIssueKey": {
+                "defaultValue": "OPSLSY-75376",
                 "type": "String"
             },
             "StatusPlanningName": {
@@ -1605,22 +1745,6 @@
             },
             "JiraClosedStatusName": {
                 "defaultValue": "Closed",
-                "type": "String"
-            },
-            "ChangeOwnerName": {
-                "defaultValue": "u464549",
-                "type": "String"
-            },
-            "ChangeAssigneeName": {
-                "defaultValue": "u464549",
-                "type": "String"
-            },
-            "ChangeManagerName": {
-                "defaultValue": "u761051",
-                "type": "String"
-            },
-            "AffectedItemKey": {
-                "defaultValue": "LCJ-37462",
                 "type": "String"
             },
             "StorageAccountName": {

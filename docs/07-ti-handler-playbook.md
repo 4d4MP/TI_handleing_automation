@@ -22,12 +22,13 @@ then walks the change to **Closed** with resolution **Successful**.
 
 ```
 trigger
-  → create OPSLSY clone        (POST /issue, fields whitelist below)
-  → walk to Implementation     (Open → Planning → Implementation, at run start)
-  → enrich + build CSV         (AbuseIPDB filter/dedupe → kept-IP rows)
-  → write blocklist blob       (ungated — the actual change being implemented)
-  → attach CSV                 (POST /issue/{key}/attachments)
-  → walk to Closed             (Post implementation review → Closed, resolution Successful)
+  → clone OPSLSY-75376          (CloneIssueDetails.jspa servlet) + find new key by search
+  → override fields             (PUT description + planned start/end; summary set at clone)
+  → walk to Implementation      (Open → Planning → Implementation, at run start)
+  → enrich + build CSV          (AbuseIPDB filter/dedupe → kept-IP rows)
+  → write blocklist blob        (ungated — the actual change being implemented)
+  → attach CSV                  (POST /issue/{key}/attachments)
+  → walk to Closed              (Post implementation review → Closed, resolution Successful)
 ```
 
 The change sits in **Implementation** for the duration of the real work (enrichment +
@@ -41,19 +42,31 @@ flagged `secureData`). Base URL `https://trackspace.lhsystems.com/rest/api/2/`.
 
 ---
 
-## The ticket — OPSLSY Technical change (clone of OPSLSY-75376)
+## The ticket — clone of OPSLSY-75376 (do NOT `POST /issue`)
 
-`OPSLSY-75376` is the field-rich template Technical change. The playbook does **not**
-call a Jira clone endpoint; it `POST /issue` with only the whitelist below. Computed
-/ scripted fields on the template are deliberately **not** copied (time-in-status,
-SLA, "Resolved by", rank, dev-summary, last-comment, the `customfield_18422`
-`<script>` "Label" hack, etc.).
+### Why clone instead of create
+
+`customfield_24305` (**Affected item**) is a Riada **Insight/Assets** field
+(`com.riadalabs.jira.plugins.insight:rlabs-customfield-default-object`) holding a Provider
+Service object (`LCJ-37462`). That object type is **outside the field's REST key-resolver
+scope**, so no REST write shape can set it:
+
+- `{ "key": "LCJ-37462" }` → *"Could not find Assets object/s (LCJ-37462)"*
+- `{ "id": … }` / `["LCJ-37462"]` → silently ignored → field stays empty → *"Affected item is required"*
+
+The field is **required to pass `Start implementation`**, so a from-scratch `POST /issue`
+can never produce a usable ticket. A **server-side clone copies the Assets value intact**
+(verified), so the playbook clones the template `OPSLSY-75376` rather than building the
+issue. Cloning also carries every other change field for free — no field whitelist, no
+per-field ids to maintain. Computed/scripted template fields (time-in-status, SLA,
+"Resolved by", rank, last-comment, the `customfield_18422` `<script>` "Label" hack, …) are
+left as the clone produced them.
 
 ### Runtime values (computed once at run start)
 
 `Capture_Run_Start` (Compose `@utcNow()`) pins a single instant; `Compute_Run_Times`
-derives the rest so start/end are consistent. Timestamps are built with `concat` (not
-a `formatDateTime` mask) to avoid the literal-`T`/`+0000` escaping trap:
+derives the rest so start/end are consistent. Timestamps are built with `concat` (not a
+`formatDateTime` mask) to avoid the literal-`T`/`+0000` escaping trap:
 
 | Value | Expression | Example |
 |---|---|---|
@@ -62,75 +75,41 @@ a `formatDateTime` mask) to avoid the literal-`T`/`+0000` escaping trap:
 | `actualStart` | = `plannedStart` (set on the PIR transition) | |
 | `actualFinish` | = `plannedEnd` (set on the PIR transition) | |
 | `dateStamp` | `formatDateTime(start,'yyyy.MM.dd')` (for the summary) | `2026.06.12` |
+| `marker` | `concat('SENTRUN', workflow().run.name)` — unique per run | `SENTRUN08585…` |
+| `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp} - {marker}` | |
 
-The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
+The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC. The `marker`
+(the Logic App run id, prefixed) makes the new clone findable by JQL and is unique per
+run so a rerun never matches a stale ticket.
 
-### Fields set on create
+### Clone mechanism (headless, confirmed working)
 
-All of these are sent on the single `POST /issue` (`Create_OPSLSY_Change`). The OPSLSY /
-`13507` **create screen requires** summary, description, Planned start/end, Category,
-Type, Impact, Risk level, Reason, Owner, and Affected item, so they must be present at
-create — they cannot be deferred to a later edit. (A bare `project`+`issuetype` create is
-rejected `400` with `… is required` for each of those.)
+1. **Resolve the template's numeric id** (env-portable): `Resolve_Template_Id` →
+   `GET /rest/api/2/issue/{TemplateIssueKey}?fields=id` → `Parse_Template_Id` → `{id}`.
+2. **Fire the clone via the servlet** (not REST): `Clone_OPSLSY_Change` →
+   `POST {JIRAHOST}/secure/CloneIssueDetails.jspa` with the Logic App's **Basic auth** +
+   `X-Atlassian-Token: no-check` (bypasses XSRF — no `atl_token` needed) +
+   `Content-Type: application/x-www-form-urlencoded`, body
+   `id={id}&summary={url-encoded summary}&cloneAttachments=false&cloneSubTasks=false&cloneLinks=false`.
+   The clone is **async**; the response redirects to `CloneIssueProgress.jspa?taskId=…`
+   (which does **not** expose the new key — it is not scraped).
+3. **Find the new key by search** (poll — the clone takes a few seconds): `Find_Clone_Key`
+   is an `Until` that `GET /rest/api/2/search?jql=project = OPSLSY AND summary ~ "{marker}" ORDER BY created DESC&maxResults=1&fields=key`,
+   parses `issues[0].key`, and sets the `Clone_Key` variable; it loops (10 s, cap 30 / PT5M)
+   until `Clone_Key` is non-empty. The summary — including the marker — was set by the
+   clone POST, so it is correct already. All downstream steps reference
+   `variables('Clone_Key')`.
 
-| Field | id | Value |
-|---|---|---|
-| Summary | `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` |
-| Description | `description` | template body below, with Accurate start/finish = `plannedStart`/`plannedEnd` |
-| Planned start | `customfield_22500` | `plannedStart` |
-| Planned end | `customfield_22501` | `plannedEnd` |
-| Category | `customfield_10905` | `{ "id": "36466" }` (3 - Medium) |
-| Type | `customfield_20619` | `{ "id": "36471" }` (Standard Change) |
-| Impact | `customfield_10401` | `{ "id": "40640" }` (Low) |
-| Risk level | `customfield_16205` | `{ "id": "40636" }` (Low) |
-| Reason | `customfield_11417` | `Several Sentinel alert created indicating there are communication with these IPs.` |
-| Change tested | `customfield_22909` | `{ "id": "32368" }` (Tested) |
-| Rollback scenario | `customfield_22222` | `Remove IP(s) that cause problem from External dynamic deny rule named - Sentinel_Threat_Intelligence_IPs` |
-| Validation procedure | `customfield_22912` | `Check logs in Sentinel. For all affected IPs the 'DeviceAction' value must be 'Deny'` |
-| Test reference | `customfield_22913` | `OPSLSY-37786` |
-| Owner | `customfield_12707` | `{ "name": "u464549" }` (param `ChangeOwnerName`) |
-| Change manager | `customfield_22914` | `{ "name": "u761051" }` (Emil Pollak, param `ChangeManagerName`) |
-| Assignee | `assignee` | `{ "name": "u464549" }` (param `ChangeAssigneeName`) |
-| Affected item | `customfield_24305` | `[ { "key": "LCJ-37462" } ]` (param `AffectedItemKey`) |
+### Override on the clone (PUT, while still Open)
 
-Project = `OPSLSY` (`JiraProjectKey`), issuetype id = `13507` Technical change
-(`JiraIssueTypeId`).
-
-> **A note on the screen errors.** An early attempt that sent these fields returned the
-> opposite error — *"Field '…' cannot be set. It is not on the appropriate screen, or
-> unknown."* for **every** field including `summary`. That blanket "not on screen" form
-> (covering even system fields) is Jira's signature for an **unresolved create context**
-> — e.g. the wrong/absent issue-type screen — not for these specific fields being off the
-> screen. Against the real OPSLSY / `13507` create screen the fields are simply
-> **required**, so they all go on create. If the "cannot be set" form ever returns, treat
-> it as a create-context/screen-scheme problem (verify the issue type and its create
-> screen via `GET /rest/api/2/issue/createmeta?projectKeys=OPSLSY&issuetypeIds=13507&expand=projects.issuetypes.fields`),
-> not as a reason to move fields off create.
-
-#### `customfield_24305` (Affected item) — confirmed write shape
-
-`customfield_24305` is a Riada **Insight/Assets** field
-(`com.riadalabs.jira.plugins.insight:rlabs-customfield-default-object`), **required on the
-create screen** (and the field the `Start implementation` transition validator checks —
-already satisfied once set at create, so it is **not** re-sent on the transition). Its
-write shape is an **array of objects referenced by Assets `objectKey`**, confirmed with a
-live `204` write-probe:
-
-```json
-"customfield_24305": [ { "key": "LCJ-37462" } ]
-```
-
-The key in the read form's parentheses (`"… (LCJ-37462)"`) **is** the `objectKey` — the
-bare-string array `["LCJ-37462"]` is the *read* form and is rejected on write
-(`expected Object`). The value is held as the single named constant `AffectedItemKey`.
-
-`LCJ-37462` is the **prod** object *"PS_SHARED_ITCSIAAS_PROD_LSY NET - CLOPS Palo Alto"*,
-read from the prod template `OPSLSY-75376`. **Assets keys are environment-specific** — a
-prod key does not resolve in int and vice-versa. If a create fails with
-`Could not find Assets object/s (<key>)`, you are pointing at the wrong environment for
-that key (e.g. running the prod key against int); override `AffectedItemKey` with that
-environment's objectKey, or re-read the relevant template's `customfield_24305`. For the
-prod `TI-handler` the value above is correct.
+The clone copies the template's old body/dates, so `Override_Clone_Fields`
+(`PUT /rest/api/2/issue/{Clone_Key}`) overrides **only** `description` (body below, with
+the Accurate start/finish lines set to `plannedStart`/`plannedEnd`), `customfield_22500`
+(Planned start), and `customfield_22501` (Planned end). The **summary** is already correct
+from the clone. Everything else — Category, Type, Reason, Impact, Risk, Owner, Change
+manager, Change tested, Rollback, Validation, **Affected item** — is inherited from the
+template and left untouched. (If any of the three ever turns out not to be editable in
+`Open`, fold it into the first transition payload instead.)
 
 ### Description body
 
@@ -175,7 +154,7 @@ implementation review→Closed `111`. Standard Change skips the approval stages.
 | Walk step | target status | POST body fields |
 |---|---|---|
 | 1. Planning | `Planning` | *(none — just `transition.id`)* |
-| 2. Implementation | `Implementation` | *(none — the create already set Category/Type/Reason/Impact/Risk/Owner/Affected item/Change manager/Change tested/Rollback/Validation, so the transition's screen + validators are satisfied)* |
+| 2. Implementation | `Implementation` | *(none — the clone carries Category/Type/Reason/Impact/Risk/Owner/Affected item/Change manager/Change tested/Rollback/Validation, so the transition's screen + validators are satisfied)* |
 | 3. Post implementation review | `Post implementation review` | `resolution = { "name": "Successful" }`, `customfield_23600 = actualStart`, `customfield_23601 = actualFinish` *(actual start/finish are only settable on this transition screen, not at create)* |
 | 4. Closed | `Closed` | `resolution = { "name": "Successful" }` |
 
@@ -220,15 +199,12 @@ Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
 
 | Parameter | Default |
 |---|---|
-| `JiraProjectKey` | `OPSLSY` |
-| `JiraIssueTypeId` | `13507` (Technical change) |
+| `JiraProjectKey` | `OPSLSY` (used in the find-clone-by-search JQL) |
+| `TemplateIssueKey` | `OPSLSY-75376` (the change cloned each run) |
 | `StatusPlanningName` | `Planning` |
 | `StatusImplementationName` | `Implementation` |
 | `StatusPostImplReviewName` | `Post implementation review` |
 | `JiraClosedStatusName` | `Closed` |
-| `ChangeOwnerName` / `ChangeAssigneeName` | `u464549` |
-| `ChangeManagerName` | `u761051` (Emil Pollak) |
-| `AffectedItemKey` | `LCJ-37462` |
 | `MinReports` | `100` |
 | `ExcludedISPs` | `["akamai technologies","google","palo alto networks","the shadowserver foundation","censys"]` |
 | `StorageAccountName` / `BlocklistContainer` / `BlocklistBlobPath` | `lsyweuritcsprdmspalo001` / `$web` / `index.html` |

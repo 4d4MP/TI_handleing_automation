@@ -62,19 +62,16 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 
 | Parameter | Default |
 |---|---|
-| `JiraProjectKey` | `OPSLSY` |
-| `JiraIssueTypeId` | `13507` (Technical change) |
+| `JiraProjectKey` | `OPSLSY` (also used in the find-clone-by-search JQL) |
+| `TemplateIssueKey` | `OPSLSY-75376` (the change cloned each run) |
 | `StatusPlanningName` / `StatusImplementationName` / `StatusPostImplReviewName` / `JiraClosedStatusName` | `Planning` / `Implementation` / `Post implementation review` / `Closed` (each matched case-insensitively as a substring of a transition's target status) |
-| `ChangeOwnerName` / `ChangeAssigneeName` | `u464549` |
-| `ChangeManagerName` | `u761051` (Emil Pollak) |
-| `AffectedItemKey` | `LCJ-37462` |
 | `MinReports` | `100` |
 | `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (matched case-insensitively as a substring of the ISP name) |
 
 ## Workflow at a glance
 
 1. Sentinel incident trigger → `Entities - Get IPs`; pull the Jira password from Key Vault (`secureData`); compute the run timestamps (`plannedStart`, `plannedEnd = +5 min`, `dateStamp`).
-2. **Create** the OPSLSY Technical change (`POST /issue` with the full field whitelist — these fields are required on the create screen) and **walk it to Implementation** (Open → Planning → Implementation) — all at run start, before any AbuseIPDB work.
+2. **Clone** the template `OPSLSY-75376` (server-side `POST /secure/CloneIssueDetails.jspa` — a clone is the only way to carry the Insight/Assets *Affected item*, which can't be REST-set), find the new key by JQL search on a unique run marker, **`PUT`** the description + planned dates, then **walk it to Implementation** (Open → Planning → Implementation) — all at run start, before any AbuseIPDB work.
 3. Health-check AbuseIPDB (`/check?ipAddress=8.8.8.8`).
    - **Up** → per-IP `/check` (50-way), keep rows with `totalReports >= MinReports` and a non-excluded ISP → `Block_IPs` + rich `CSV_Rows`.
    - **Down** → fallback: build `Block_IPs` + `CSV_Rows` from the **raw** incident IP list. No separate ticket — the change already exists.
