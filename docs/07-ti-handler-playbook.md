@@ -91,8 +91,15 @@ run so a rerun never matches a stale ticket.
    `X-Atlassian-Token: no-check` (bypasses XSRF — no `atl_token` needed) +
    `Content-Type: application/x-www-form-urlencoded`, body
    `id={id}&summary={url-encoded summary}&cloneAttachments=false&cloneSubTasks=false&cloneLinks=false`.
-   The clone is **async**; the response redirects to `CloneIssueProgress.jspa?taskId=…`
+   The clone is **async**; the response is a **`302` redirect** to `CloneIssueProgress.jspa?taskId=…`
    (which does **not** expose the new key — it is not scraped).
+   - **The `302` is the success signal.** The Logic App HTTP action treats only `2xx` as
+     success, so on `302` it reports the action **Failed** even though the clone committed.
+     `Check_Clone_Status` therefore runs after the clone on **both `Succeeded` and `Failed`**
+     and gates on the status code — `@less(coalesce(outputs('Clone_OPSLSY_Change').statusCode, 599), 400)`
+     (i.e. any `2xx`/`3xx` is success; `4xx`/`5xx`/no-response terminates the run with
+     `CloneFailed`). The continuation (`Find_Clone_Key`) runs after `Check_Clone_Status`,
+     so a genuine clone error stops the run while the normal `302` flows straight through.
 3. **Find the new key by search** (poll — the clone takes a few seconds): `Find_Clone_Key`
    is an `Until` that `GET /rest/api/2/search?jql=project = OPSLSY AND summary ~ "{marker}" ORDER BY created DESC&maxResults=1&fields=key`,
    parses `issues[0].key`, and sets the `Clone_Key` variable; it loops (10 s, cap 30 / PT5M)

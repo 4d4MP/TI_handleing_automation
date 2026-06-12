@@ -498,6 +498,37 @@
                                 }
                             }
                         },
+                        "Check_Clone_Status": {
+                            "type": "If",
+                            "expression": {
+                                "less": [
+                                    "@coalesce(outputs('Clone_OPSLSY_Change')?['statusCode'], 599)",
+                                    400
+                                ]
+                            },
+                            "actions": {},
+                            "else": {
+                                "actions": {
+                                    "Terminate_Clone_Failed": {
+                                        "type": "Terminate",
+                                        "inputs": {
+                                            "runStatus": "Failed",
+                                            "runError": {
+                                                "code": "CloneFailed",
+                                                "message": "CloneIssueDetails.jspa returned status @{coalesce(outputs('Clone_OPSLSY_Change')?['statusCode'], 'none')}; expected 2xx/3xx (302 is the normal async-clone redirect and is treated as success)."
+                                            }
+                                        },
+                                        "runAfter": {}
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "Clone_OPSLSY_Change": [
+                                    "Succeeded",
+                                    "Failed"
+                                ]
+                            }
+                        },
                         "Find_Clone_Key": {
                             "type": "Until",
                             "expression": "@not(equals(variables('Clone_Key'), ''))",
@@ -601,7 +632,7 @@
                                 }
                             },
                             "runAfter": {
-                                "Clone_OPSLSY_Change": [
+                                "Check_Clone_Status": [
                                     "Succeeded"
                                 ]
                             }
