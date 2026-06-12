@@ -75,9 +75,14 @@ derives the rest so start/end are consistent. Timestamps are built with `concat`
 | `actualStart` | = `plannedStart` (set on the PIR transition) | |
 | `actualFinish` | = `plannedEnd` (set on the PIR transition) | |
 | `dateStamp` | `formatDateTime(start,'yyyy.MM.dd')` (for the summary) | `2026.06.12` |
+| `displayStart` | `formatDateTime(start,'yyyy-MM-dd HH:mm')` (for the description body) | `2026-06-12 19:33` |
+| `displayFinish` | same over `addMinutes(start,5)` | `2026-06-12 19:38` |
 | `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` | |
 
-The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
+The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC. The
+`customfield_22500`/`22501` **Planned start/end** fields carry the full
+`plannedStart`/`plannedEnd` ISO timestamps, while the **description body** uses the
+human-readable `displayStart`/`displayFinish` (`yyyy-MM-dd HH:mm`).
 
 ### Clone mechanism (headless, confirmed working)
 
@@ -115,8 +120,8 @@ The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
 
 The clone copies the template's old body/dates, so `Override_Clone_Fields`
 (`PUT /rest/api/2/issue/{Clone_Key}`) overrides **only** `description` (body below, with
-the Accurate start/finish lines set to `plannedStart`/`plannedEnd`), `customfield_22500`
-(Planned start), and `customfield_22501` (Planned end). The **summary** is already correct
+the Accurate start/finish lines set to `displayStart`/`displayFinish`), `customfield_22500`
+(Planned start = `plannedStart`), and `customfield_22501` (Planned end = `plannedEnd`). The **summary** is already correct
 from the clone. Everything else — Category, Type, Reason, Impact, Risk, Owner, Change
 manager, Change tested, Rollback, Validation, **Affected item** — is inherited from the
 template and left untouched. (If any of the three ever turns out not to be editable in
@@ -128,8 +133,8 @@ template and left untouched. (If any of the three ever turns out not to be edita
 *GOAL:* Block suspicious/malicious IPs maked by Microsoft Sentinel Threat Intelligence
 *Root-cause:* Several Sentinel alert created indicating there are communication with these IPs.
 *Time frame:* in optimal case approximately 5 minutes
-*Accurate start time:* {plannedStart}
-*Accurate finish time:* {plannedEnd}
+*Accurate start time:* {displayStart}
+*Accurate finish time:* {displayFinish}
 *Affected Service:* Palo Alto Fws
 *Impact:* Not expected.
 *Tested:* OPSLSY-37786
