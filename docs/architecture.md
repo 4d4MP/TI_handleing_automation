@@ -86,7 +86,9 @@ Everything else — Category, Type, Reason, Impact, Risk, Owner, Change manager,
 
 The transition ids are per-workflow and drift between test and prod, so the walk never hardcodes them. At each step it `GET`s `/issue/{key}/transitions?expand=transitions.fields`, filters to the transition whose `to.name` contains the desired status name (case-insensitive) **and** whose `name` does not contain `revoke / withdraw / re-plan / reject / cancel / update cmdb`, then `POST`s `{transition:{id}, fields:{…}}`. Because heavy Trackspace transitions often drop the HTTP connection but still commit, each step then **polls** `GET /issue/{key}?fields=status` in an `Until` (10 s × up to 60 / PT10M) until the status lands, and the poll runs even if the POST is reported `Failed`/`TimedOut`.
 
-Per-transition `fields`: Planning and Implementation send none (the clone already carries the fields their screens/validators need, including the Affected item); Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` = actual start/finish (only settable on that screen); Closed sends `resolution=Successful`.
+Each step is **hardened so a stuck transition fails loudly** rather than POSTing an empty id and limping on: `Guard_Transition_*` `Terminate`s with `TransitionNotFound` (+ current status) if the name filter is empty, and `Confirm_*_Landed` re-fetches the status after the poll and `Terminate`s with `TransitionDidNotLand` if the ticket isn't in the target status.
+
+Per-transition `fields`: Planning sends none; **Implementation sets `customfield_22500`/`22501` (Planned start/end) to `utcNow()+20m`/`+25m` computed at the hop** — the *Start implementation* validator rejects a past Planned start, and the run-start value is stale by then — capturing them into the `Planned_Start`/`Planned_End` variables; Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` (actuals) = the same `Planned_Start`/`Planned_End`; Closed sends `resolution=Successful`. (The Affected item and the other change fields are inherited from the clone.)
 
 ## Filter semantics
 

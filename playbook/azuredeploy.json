@@ -801,6 +801,106 @@
                                         ]
                                     }
                                 },
+                                "Guard_Transition_Planning": {
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@length(body('Filter_Transition_Planning'))",
+                                            0
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Get_Status_Guard_Planning": {
+                                            "type": "Http",
+                                            "inputs": {
+                                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                                                "method": "GET",
+                                                "queries": {
+                                                    "fields": "status"
+                                                },
+                                                "authentication": {
+                                                    "type": "Basic",
+                                                    "username": "@parameters('JIRAUserName')",
+                                                    "password": "@body('Get_Jira_password')?['value']"
+                                                }
+                                            },
+                                            "runAfter": {},
+                                            "runtimeConfiguration": {
+                                                "secureData": {
+                                                    "properties": [
+                                                        "inputs"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "Parse_Status_Guard_Planning": {
+                                            "type": "ParseJson",
+                                            "inputs": {
+                                                "content": "@body('Get_Status_Guard_Planning')",
+                                                "schema": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "fields": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "status": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "name": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        },
+                                                                        "statusCategory": {
+                                                                            "type": "object",
+                                                                            "properties": {
+                                                                                "key": {
+                                                                                    "type": [
+                                                                                        "string",
+                                                                                        "null"
+                                                                                    ]
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Get_Status_Guard_Planning": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        },
+                                        "Terminate_No_Transition_Planning": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TransitionNotFound",
+                                                    "message": "No transition to '@{parameters('StatusPlanningName')}' is available on @{variables('Clone_Key')}; current status is '@{coalesce(body('Parse_Status_Guard_Planning')?['fields']?['status']?['name'], 'unknown')}'."
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Parse_Status_Guard_Planning": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "runAfter": {
+                                        "Filter_Transition_Planning": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
                                 "Post_Transition_Planning": {
                                     "type": "Http",
                                     "inputs": {
@@ -821,7 +921,7 @@
                                         }
                                     },
                                     "runAfter": {
-                                        "Filter_Transition_Planning": [
+                                        "Guard_Transition_Planning": [
                                             "Succeeded"
                                         ]
                                     },
@@ -929,6 +1029,115 @@
                                             "TimedOut"
                                         ]
                                     }
+                                },
+                                "Confirm_Get_Status_Planning": {
+                                    "type": "Http",
+                                    "inputs": {
+                                        "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                                        "method": "GET",
+                                        "queries": {
+                                            "fields": "status"
+                                        },
+                                        "authentication": {
+                                            "type": "Basic",
+                                            "username": "@parameters('JIRAUserName')",
+                                            "password": "@body('Get_Jira_password')?['value']"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Wait_Until_Planning_Landed": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "runtimeConfiguration": {
+                                        "secureData": {
+                                            "properties": [
+                                                "inputs"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "Confirm_Parse_Status_Planning": {
+                                    "type": "ParseJson",
+                                    "inputs": {
+                                        "content": "@body('Confirm_Get_Status_Planning')",
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "fields": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "status": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "name": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "statusCategory": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "key": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Confirm_Get_Status_Planning": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Confirm_Eval_Planning": {
+                                    "type": "Compose",
+                                    "inputs": "@if(contains(toLower(coalesce(body('Confirm_Parse_Status_Planning')?['fields']?['status']?['name'], '')), toLower(parameters('StatusPlanningName'))), 'landed', 'not_landed')",
+                                    "runAfter": {
+                                        "Confirm_Parse_Status_Planning": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Confirm_Planning_Landed": {
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@outputs('Confirm_Eval_Planning')",
+                                            "not_landed"
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Terminate_Did_Not_Land_Planning": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TransitionDidNotLand",
+                                                    "message": "Transition to '@{parameters('StatusPlanningName')}' did not land on @{variables('Clone_Key')}; current status '@{coalesce(body('Confirm_Parse_Status_Planning')?['fields']?['status']?['name'], 'unknown')}', transition POST returned @{coalesce(outputs('Post_Transition_Planning')?['statusCode'], 'n/a')}."
+                                                }
+                                            },
+                                            "runAfter": {}
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "runAfter": {
+                                        "Confirm_Eval_Planning": [
+                                            "Succeeded"
+                                        ]
+                                    }
                                 }
                             },
                             "runAfter": {
@@ -1019,6 +1228,139 @@
                                         ]
                                     }
                                 },
+                                "Guard_Transition_Implementation": {
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@length(body('Filter_Transition_Implementation'))",
+                                            0
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Get_Status_Guard_Implementation": {
+                                            "type": "Http",
+                                            "inputs": {
+                                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                                                "method": "GET",
+                                                "queries": {
+                                                    "fields": "status"
+                                                },
+                                                "authentication": {
+                                                    "type": "Basic",
+                                                    "username": "@parameters('JIRAUserName')",
+                                                    "password": "@body('Get_Jira_password')?['value']"
+                                                }
+                                            },
+                                            "runAfter": {},
+                                            "runtimeConfiguration": {
+                                                "secureData": {
+                                                    "properties": [
+                                                        "inputs"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "Parse_Status_Guard_Implementation": {
+                                            "type": "ParseJson",
+                                            "inputs": {
+                                                "content": "@body('Get_Status_Guard_Implementation')",
+                                                "schema": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "fields": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "status": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "name": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        },
+                                                                        "statusCategory": {
+                                                                            "type": "object",
+                                                                            "properties": {
+                                                                                "key": {
+                                                                                    "type": [
+                                                                                        "string",
+                                                                                        "null"
+                                                                                    ]
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Get_Status_Guard_Implementation": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        },
+                                        "Terminate_No_Transition_Implementation": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TransitionNotFound",
+                                                    "message": "No transition to '@{parameters('StatusImplementationName')}' is available on @{variables('Clone_Key')}; current status is '@{coalesce(body('Parse_Status_Guard_Implementation')?['fields']?['status']?['name'], 'unknown')}'."
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Parse_Status_Guard_Implementation": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "runAfter": {
+                                        "Filter_Transition_Implementation": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Capture_Impl_Time": {
+                                    "type": "Compose",
+                                    "inputs": "@utcNow()",
+                                    "runAfter": {
+                                        "Guard_Transition_Implementation": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Set_Planned_Start": {
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "Planned_Start",
+                                        "value": "@{concat(formatDateTime(addMinutes(outputs('Capture_Impl_Time'), 20), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Impl_Time'), 20), 'HH:mm:ss'), '.000+0000')}"
+                                    },
+                                    "runAfter": {
+                                        "Capture_Impl_Time": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Set_Planned_End": {
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "Planned_End",
+                                        "value": "@{concat(formatDateTime(addMinutes(outputs('Capture_Impl_Time'), 25), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Impl_Time'), 25), 'HH:mm:ss'), '.000+0000')}"
+                                    },
+                                    "runAfter": {
+                                        "Set_Planned_Start": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
                                 "Post_Transition_Implementation": {
                                     "type": "Http",
                                     "inputs": {
@@ -1030,6 +1372,10 @@
                                         "body": {
                                             "transition": {
                                                 "id": "@{first(body('Filter_Transition_Implementation'))?['id']}"
+                                            },
+                                            "fields": {
+                                                "customfield_22500": "@{variables('Planned_Start')}",
+                                                "customfield_22501": "@{variables('Planned_End')}"
                                             }
                                         },
                                         "authentication": {
@@ -1039,7 +1385,7 @@
                                         }
                                     },
                                     "runAfter": {
-                                        "Filter_Transition_Implementation": [
+                                        "Set_Planned_End": [
                                             "Succeeded"
                                         ]
                                     },
@@ -1145,6 +1491,115 @@
                                             "Succeeded",
                                             "Failed",
                                             "TimedOut"
+                                        ]
+                                    }
+                                },
+                                "Confirm_Get_Status_Implementation": {
+                                    "type": "Http",
+                                    "inputs": {
+                                        "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                                        "method": "GET",
+                                        "queries": {
+                                            "fields": "status"
+                                        },
+                                        "authentication": {
+                                            "type": "Basic",
+                                            "username": "@parameters('JIRAUserName')",
+                                            "password": "@body('Get_Jira_password')?['value']"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Wait_Until_Implementation_Landed": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "runtimeConfiguration": {
+                                        "secureData": {
+                                            "properties": [
+                                                "inputs"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "Confirm_Parse_Status_Implementation": {
+                                    "type": "ParseJson",
+                                    "inputs": {
+                                        "content": "@body('Confirm_Get_Status_Implementation')",
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "fields": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "status": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "name": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "statusCategory": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "key": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Confirm_Get_Status_Implementation": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Confirm_Eval_Implementation": {
+                                    "type": "Compose",
+                                    "inputs": "@if(contains(toLower(coalesce(body('Confirm_Parse_Status_Implementation')?['fields']?['status']?['name'], '')), toLower(parameters('StatusImplementationName'))), 'landed', 'not_landed')",
+                                    "runAfter": {
+                                        "Confirm_Parse_Status_Implementation": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Confirm_Implementation_Landed": {
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@outputs('Confirm_Eval_Implementation')",
+                                            "not_landed"
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Terminate_Did_Not_Land_Implementation": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TransitionDidNotLand",
+                                                    "message": "Transition to '@{parameters('StatusImplementationName')}' did not land on @{variables('Clone_Key')}; current status '@{coalesce(body('Confirm_Parse_Status_Implementation')?['fields']?['status']?['name'], 'unknown')}', transition POST returned @{coalesce(outputs('Post_Transition_Implementation')?['statusCode'], 'n/a')}."
+                                                }
+                                            },
+                                            "runAfter": {}
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "runAfter": {
+                                        "Confirm_Eval_Implementation": [
+                                            "Succeeded"
                                         ]
                                     }
                                 }
@@ -1685,6 +2140,106 @@
                                         ]
                                     }
                                 },
+                                "Guard_Transition_PIR": {
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@length(body('Filter_Transition_PIR'))",
+                                            0
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Get_Status_Guard_PIR": {
+                                            "type": "Http",
+                                            "inputs": {
+                                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                                                "method": "GET",
+                                                "queries": {
+                                                    "fields": "status"
+                                                },
+                                                "authentication": {
+                                                    "type": "Basic",
+                                                    "username": "@parameters('JIRAUserName')",
+                                                    "password": "@body('Get_Jira_password')?['value']"
+                                                }
+                                            },
+                                            "runAfter": {},
+                                            "runtimeConfiguration": {
+                                                "secureData": {
+                                                    "properties": [
+                                                        "inputs"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "Parse_Status_Guard_PIR": {
+                                            "type": "ParseJson",
+                                            "inputs": {
+                                                "content": "@body('Get_Status_Guard_PIR')",
+                                                "schema": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "fields": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "status": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "name": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        },
+                                                                        "statusCategory": {
+                                                                            "type": "object",
+                                                                            "properties": {
+                                                                                "key": {
+                                                                                    "type": [
+                                                                                        "string",
+                                                                                        "null"
+                                                                                    ]
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Get_Status_Guard_PIR": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        },
+                                        "Terminate_No_Transition_PIR": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TransitionNotFound",
+                                                    "message": "No transition to '@{parameters('StatusPostImplReviewName')}' is available on @{variables('Clone_Key')}; current status is '@{coalesce(body('Parse_Status_Guard_PIR')?['fields']?['status']?['name'], 'unknown')}'."
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Parse_Status_Guard_PIR": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "runAfter": {
+                                        "Filter_Transition_PIR": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
                                 "Post_Transition_PIR": {
                                     "type": "Http",
                                     "inputs": {
@@ -1701,8 +2256,8 @@
                                                 "resolution": {
                                                     "name": "Successful"
                                                 },
-                                                "customfield_23600": "@{outputs('Compute_Run_Times')['plannedStart']}",
-                                                "customfield_23601": "@{outputs('Compute_Run_Times')['plannedEnd']}"
+                                                "customfield_23600": "@{variables('Planned_Start')}",
+                                                "customfield_23601": "@{variables('Planned_End')}"
                                             }
                                         },
                                         "authentication": {
@@ -1712,7 +2267,7 @@
                                         }
                                     },
                                     "runAfter": {
-                                        "Filter_Transition_PIR": [
+                                        "Guard_Transition_PIR": [
                                             "Succeeded"
                                         ]
                                     },
@@ -1820,6 +2375,115 @@
                                             "TimedOut"
                                         ]
                                     }
+                                },
+                                "Confirm_Get_Status_PIR": {
+                                    "type": "Http",
+                                    "inputs": {
+                                        "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                                        "method": "GET",
+                                        "queries": {
+                                            "fields": "status"
+                                        },
+                                        "authentication": {
+                                            "type": "Basic",
+                                            "username": "@parameters('JIRAUserName')",
+                                            "password": "@body('Get_Jira_password')?['value']"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Wait_Until_PIR_Landed": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "runtimeConfiguration": {
+                                        "secureData": {
+                                            "properties": [
+                                                "inputs"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "Confirm_Parse_Status_PIR": {
+                                    "type": "ParseJson",
+                                    "inputs": {
+                                        "content": "@body('Confirm_Get_Status_PIR')",
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "fields": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "status": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "name": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "statusCategory": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "key": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Confirm_Get_Status_PIR": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Confirm_Eval_PIR": {
+                                    "type": "Compose",
+                                    "inputs": "@if(contains(toLower(coalesce(body('Confirm_Parse_Status_PIR')?['fields']?['status']?['name'], '')), toLower(parameters('StatusPostImplReviewName'))), 'landed', 'not_landed')",
+                                    "runAfter": {
+                                        "Confirm_Parse_Status_PIR": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Confirm_PIR_Landed": {
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@outputs('Confirm_Eval_PIR')",
+                                            "not_landed"
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Terminate_Did_Not_Land_PIR": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TransitionDidNotLand",
+                                                    "message": "Transition to '@{parameters('StatusPostImplReviewName')}' did not land on @{variables('Clone_Key')}; current status '@{coalesce(body('Confirm_Parse_Status_PIR')?['fields']?['status']?['name'], 'unknown')}', transition POST returned @{coalesce(outputs('Post_Transition_PIR')?['statusCode'], 'n/a')}."
+                                                }
+                                            },
+                                            "runAfter": {}
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "runAfter": {
+                                        "Confirm_Eval_PIR": [
+                                            "Succeeded"
+                                        ]
+                                    }
                                 }
                             },
                             "runAfter": {
@@ -1910,6 +2574,106 @@
                                         ]
                                     }
                                 },
+                                "Guard_Transition_Closed": {
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@length(body('Filter_Transition_Closed'))",
+                                            0
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Get_Status_Guard_Closed": {
+                                            "type": "Http",
+                                            "inputs": {
+                                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                                                "method": "GET",
+                                                "queries": {
+                                                    "fields": "status"
+                                                },
+                                                "authentication": {
+                                                    "type": "Basic",
+                                                    "username": "@parameters('JIRAUserName')",
+                                                    "password": "@body('Get_Jira_password')?['value']"
+                                                }
+                                            },
+                                            "runAfter": {},
+                                            "runtimeConfiguration": {
+                                                "secureData": {
+                                                    "properties": [
+                                                        "inputs"
+                                                    ]
+                                                }
+                                            }
+                                        },
+                                        "Parse_Status_Guard_Closed": {
+                                            "type": "ParseJson",
+                                            "inputs": {
+                                                "content": "@body('Get_Status_Guard_Closed')",
+                                                "schema": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "fields": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "status": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "name": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        },
+                                                                        "statusCategory": {
+                                                                            "type": "object",
+                                                                            "properties": {
+                                                                                "key": {
+                                                                                    "type": [
+                                                                                        "string",
+                                                                                        "null"
+                                                                                    ]
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Get_Status_Guard_Closed": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        },
+                                        "Terminate_No_Transition_Closed": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TransitionNotFound",
+                                                    "message": "No transition to '@{parameters('JiraClosedStatusName')}' is available on @{variables('Clone_Key')}; current status is '@{coalesce(body('Parse_Status_Guard_Closed')?['fields']?['status']?['name'], 'unknown')}'."
+                                                }
+                                            },
+                                            "runAfter": {
+                                                "Parse_Status_Guard_Closed": [
+                                                    "Succeeded"
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "runAfter": {
+                                        "Filter_Transition_Closed": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
                                 "Post_Transition_Closed": {
                                     "type": "Http",
                                     "inputs": {
@@ -1935,7 +2699,7 @@
                                         }
                                     },
                                     "runAfter": {
-                                        "Filter_Transition_Closed": [
+                                        "Guard_Transition_Closed": [
                                             "Succeeded"
                                         ]
                                     },
@@ -2043,10 +2807,153 @@
                                             "TimedOut"
                                         ]
                                     }
+                                },
+                                "Confirm_Get_Status_Closed": {
+                                    "type": "Http",
+                                    "inputs": {
+                                        "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
+                                        "method": "GET",
+                                        "queries": {
+                                            "fields": "status"
+                                        },
+                                        "authentication": {
+                                            "type": "Basic",
+                                            "username": "@parameters('JIRAUserName')",
+                                            "password": "@body('Get_Jira_password')?['value']"
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Wait_Until_Closed_Landed": [
+                                            "Succeeded"
+                                        ]
+                                    },
+                                    "runtimeConfiguration": {
+                                        "secureData": {
+                                            "properties": [
+                                                "inputs"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "Confirm_Parse_Status_Closed": {
+                                    "type": "ParseJson",
+                                    "inputs": {
+                                        "content": "@body('Confirm_Get_Status_Closed')",
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "fields": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "status": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "name": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "statusCategory": {
+                                                                    "type": "object",
+                                                                    "properties": {
+                                                                        "key": {
+                                                                            "type": [
+                                                                                "string",
+                                                                                "null"
+                                                                            ]
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Confirm_Get_Status_Closed": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Confirm_Eval_Closed": {
+                                    "type": "Compose",
+                                    "inputs": "@if(or(contains(toLower(coalesce(body('Confirm_Parse_Status_Closed')?['fields']?['status']?['name'], '')), toLower(parameters('JiraClosedStatusName'))), equals(toLower(coalesce(body('Confirm_Parse_Status_Closed')?['fields']?['status']?['statusCategory']?['key'], '')), 'done')), 'landed', 'not_landed')",
+                                    "runAfter": {
+                                        "Confirm_Parse_Status_Closed": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Confirm_Closed_Landed": {
+                                    "type": "If",
+                                    "expression": {
+                                        "equals": [
+                                            "@outputs('Confirm_Eval_Closed')",
+                                            "not_landed"
+                                        ]
+                                    },
+                                    "actions": {
+                                        "Terminate_Did_Not_Land_Closed": {
+                                            "type": "Terminate",
+                                            "inputs": {
+                                                "runStatus": "Failed",
+                                                "runError": {
+                                                    "code": "TransitionDidNotLand",
+                                                    "message": "Transition to '@{parameters('JiraClosedStatusName')}' did not land on @{variables('Clone_Key')}; current status '@{coalesce(body('Confirm_Parse_Status_Closed')?['fields']?['status']?['name'], 'unknown')}', transition POST returned @{coalesce(outputs('Post_Transition_Closed')?['statusCode'], 'n/a')}."
+                                                }
+                                            },
+                                            "runAfter": {}
+                                        }
+                                    },
+                                    "else": {
+                                        "actions": {}
+                                    },
+                                    "runAfter": {
+                                        "Confirm_Eval_Closed": [
+                                            "Succeeded"
+                                        ]
+                                    }
                                 }
                             },
                             "runAfter": {
                                 "Walk_to_Post_Implementation_Review": [
+                                    "Succeeded"
+                                ]
+                            }
+                        },
+                        "Initialize_Planned_Start": {
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "Planned_Start",
+                                        "type": "string",
+                                        "value": ""
+                                    }
+                                ]
+                            },
+                            "runAfter": {
+                                "Initialize_Clone_Key": [
+                                    "Succeeded"
+                                ]
+                            }
+                        },
+                        "Initialize_Planned_End": {
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "Planned_End",
+                                        "type": "string",
+                                        "value": ""
+                                    }
+                                ]
+                            },
+                            "runAfter": {
+                                "Initialize_Planned_Start": [
                                     "Succeeded"
                                 ]
                             }
