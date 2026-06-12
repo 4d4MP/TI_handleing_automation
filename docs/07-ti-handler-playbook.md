@@ -75,12 +75,9 @@ derives the rest so start/end are consistent. Timestamps are built with `concat`
 | `actualStart` | = `plannedStart` (set on the PIR transition) | |
 | `actualFinish` | = `plannedEnd` (set on the PIR transition) | |
 | `dateStamp` | `formatDateTime(start,'yyyy.MM.dd')` (for the summary) | `2026.06.12` |
-| `marker` | `concat('SENTRUN', workflow().run.name)` — unique per run | `SENTRUN08585…` |
-| `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp} - {marker}` | |
+| `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` | |
 
-The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC. The `marker`
-(the Logic App run id, prefixed) makes the new clone findable by JQL and is unique per
-run so a rerun never matches a stale ticket.
+The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
 
 ### Clone mechanism (headless, confirmed working)
 
@@ -100,12 +97,19 @@ run so a rerun never matches a stale ticket.
      (i.e. any `2xx`/`3xx` is success; `4xx`/`5xx`/no-response terminates the run with
      `CloneFailed`). The continuation (`Find_Clone_Key`) runs after `Check_Clone_Status`,
      so a genuine clone error stops the run while the normal `302` flows straight through.
-3. **Find the new key by search** (poll — the clone takes a few seconds): `Find_Clone_Key`
-   is an `Until` that `GET /rest/api/2/search?jql=project = OPSLSY AND summary ~ "{marker}" ORDER BY created DESC&maxResults=1&fields=key`,
-   parses `issues[0].key`, and sets the `Clone_Key` variable; it loops (10 s, cap 30 / PT5M)
-   until `Clone_Key` is non-empty. The summary — including the marker — was set by the
-   clone POST, so it is correct already. All downstream steps reference
-   `variables('Clone_Key')`.
+3. **Find the new key by search** (poll — the clone indexes a few seconds after the async
+   commit): `Find_Clone_Key` is an `Until` that polls
+   `GET /rest/api/2/search` with
+   `jql = project = OPSLSY AND issuetype = "Technical change" AND reporter = {JIRAUserName} AND created >= -10m ORDER BY created DESC`,
+   `maxResults=1`, `fields=key,created,summary`. The reporter is the `sentinelsvc` service
+   account and one run creates exactly one clone, so this is reliable — unlike a
+   `summary ~ "<marker>"` text match, which Jira tokenises unreliably and which suffers
+   index lag. The key is captured into `Clone_Key` **only when** `issues[0]` exists **and**
+   `issues[0].fields.created >= Capture_Run_Start` (`ticks()` comparison) — the time guard
+   prevents picking up a stray ticket a previous run may have leaked inside the 10-minute
+   window. The loop delays 10 s, caps at **12 attempts / PT2M**, then `Verify_Clone_Found`
+   terminates the run with `CloneNotFound` if `Clone_Key` is still empty. All downstream
+   steps reference `variables('Clone_Key')` (unchanged name).
 
 ### Override on the clone (PUT, while still Open)
 

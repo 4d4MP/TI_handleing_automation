@@ -20,13 +20,14 @@ Sentinel incident trigger
   │
   ├─► Entities - Get IPs          (Sentinel connector)
   ├─► Get_Jira_password           (Key Vault, secureData)
-  ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart, plannedEnd=+5m, dateStamp, marker, summary)
+  ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart, plannedEnd=+5m, dateStamp, summary)
   ├─► Initialize Excluded_IPs / Block_IPs / CSV_Rows / Clone_Key  (root-level variables)
   │
   ├─► Resolve_Template_Id          (GET issue/OPSLSY-75376?fields=id) → Parse_Template_Id
   ├─► Clone_OPSLSY_Change          (POST /secure/CloneIssueDetails.jspa, Basic + X-Atlassian-Token:no-check)
   ├─► Check_Clone_Status           (runAfter Succeeded|Failed; 302/2xx → continue, else Terminate)
-  ├─► Find_Clone_Key (Until)       (poll GET /search?jql=summary~marker → set Clone_Key)
+  ├─► Find_Clone_Key (Until)       (poll GET /search jql=reporter+created>=-10m, guard created>=runStart → set Clone_Key)
+  ├─► Verify_Clone_Found           (Clone_Key empty → Terminate CloneNotFound)
   ├─► Override_Clone_Fields        (PUT issue/{Clone_Key}: description + planned start/end)
   ├─► Walk_to_Planning            (re-probe transitions → POST → poll until landed)
   ├─► Walk_to_Implementation      (re-probe transitions → POST → poll until landed)
@@ -77,7 +78,7 @@ The managed identity does **not** need any permission on the AbuseIPDB connectio
 
 ## The change ticket — OPSLSY Technical change
 
-The ticket is produced by a **server-side clone** of the template `OPSLSY-75376`, not by `POST /issue`. The reason is `customfield_24305` (**Affected item**): a Riada Insight/Assets object field whose Provider Service object (`LCJ-37462`) is outside the field's REST key-resolver scope, so it **cannot be set via any REST write shape** (`{"key":…}` → "Could not find"; id/string forms → silently ignored → "required") — yet it is required to pass `Start implementation`. A clone copies the Assets value (and every other change field) intact. Flow: `Resolve_Template_Id` (GET the template's numeric id) → `Clone_OPSLSY_Change` (`POST /secure/CloneIssueDetails.jspa`, form-encoded, Basic auth + `X-Atlassian-Token: no-check`, `cloneAttachments/SubTasks/Links=false`; the servlet answers `302`, which the HTTP action reports as `Failed`, so `Check_Clone_Status` runs on `Succeeded|Failed` and treats `2xx`/`3xx` as success — `4xx`/`5xx` terminate the run) → `Find_Clone_Key` (the clone is async, so poll `GET /search` for the unique summary `marker` and capture the new key in the `Clone_Key` variable) → `Override_Clone_Fields` (`PUT` description + planned start/end while Open; summary was set by the clone). Full detail in `docs/07-ti-handler-playbook.md`.
+The ticket is produced by a **server-side clone** of the template `OPSLSY-75376`, not by `POST /issue`. The reason is `customfield_24305` (**Affected item**): a Riada Insight/Assets object field whose Provider Service object (`LCJ-37462`) is outside the field's REST key-resolver scope, so it **cannot be set via any REST write shape** (`{"key":…}` → "Could not find"; id/string forms → silently ignored → "required") — yet it is required to pass `Start implementation`. A clone copies the Assets value (and every other change field) intact. Flow: `Resolve_Template_Id` (GET the template's numeric id) → `Clone_OPSLSY_Change` (`POST /secure/CloneIssueDetails.jspa`, form-encoded, Basic auth + `X-Atlassian-Token: no-check`, `cloneAttachments/SubTasks/Links=false`; the servlet answers `302`, which the HTTP action reports as `Failed`, so `Check_Clone_Status` runs on `Succeeded|Failed` and treats `2xx`/`3xx` as success — `4xx`/`5xx` terminate the run) → `Find_Clone_Key` (the clone is async, so poll `GET /search` with `reporter = sentinelsvc AND issuetype = "Technical change" AND created >= -10m ORDER BY created DESC`, capturing the key into `Clone_Key` only when `issues[0].created >= run start` — a reporter+time-window lookup, not a `summary ~ marker` text match) → `Verify_Clone_Found` (terminate `CloneNotFound` if still empty) → `Override_Clone_Fields` (`PUT` description + planned start/end while Open; summary was set by the clone). Full detail in `docs/07-ti-handler-playbook.md`.
 
 Everything else — Category, Type, Reason, Impact, Risk, Owner, Change manager, Change tested, Rollback, Validation, and the **Affected item** — is inherited from the template clone and never set by the playbook.
 

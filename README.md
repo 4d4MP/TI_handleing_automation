@@ -71,7 +71,7 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 ## Workflow at a glance
 
 1. Sentinel incident trigger → `Entities - Get IPs`; pull the Jira password from Key Vault (`secureData`); compute the run timestamps (`plannedStart`, `plannedEnd = +5 min`, `dateStamp`).
-2. **Clone** the template `OPSLSY-75376` (server-side `POST /secure/CloneIssueDetails.jspa` — a clone is the only way to carry the Insight/Assets *Affected item*, which can't be REST-set), find the new key by JQL search on a unique run marker, **`PUT`** the description + planned dates, then **walk it to Implementation** (Open → Planning → Implementation) — all at run start, before any AbuseIPDB work.
+2. **Clone** the template `OPSLSY-75376` (server-side `POST /secure/CloneIssueDetails.jspa` — a clone is the only way to carry the Insight/Assets *Affected item*, which can't be REST-set), find the new key by JQL search (reporter `sentinelsvc` + `created >= -10m`, guarded by `created >= run start`), **`PUT`** the description + planned dates, then **walk it to Implementation** (Open → Planning → Implementation) — all at run start, before any AbuseIPDB work.
 3. Health-check AbuseIPDB (`/check?ipAddress=8.8.8.8`).
    - **Up** → per-IP `/check` (50-way), keep rows with `totalReports >= MinReports` and a non-excluded ISP → `Block_IPs` + rich `CSV_Rows`.
    - **Down** → fallback: build `Block_IPs` + `CSV_Rows` from the **raw** incident IP list. No separate ticket — the change already exists.

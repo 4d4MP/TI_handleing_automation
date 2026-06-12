@@ -340,8 +340,7 @@
                                 "plannedStart": "@{concat(formatDateTime(outputs('Capture_Run_Start'), 'yyyy-MM-dd'), 'T', formatDateTime(outputs('Capture_Run_Start'), 'HH:mm:ss'), '.000+0000')}",
                                 "plannedEnd": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 5), 'HH:mm:ss'), '.000+0000')}",
                                 "dateStamp": "@{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}",
-                                "marker": "@{concat('SENTRUN', workflow()['run']['name'])}",
-                                "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')} - SENTRUN@{workflow()['run']['name']}"
+                                "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
                             },
                             "runAfter": {
                                 "Capture_Run_Start": [
@@ -533,8 +532,8 @@
                             "type": "Until",
                             "expression": "@not(equals(variables('Clone_Key'), ''))",
                             "limit": {
-                                "count": 30,
-                                "timeout": "PT5M"
+                                "count": 12,
+                                "timeout": "PT2M"
                             },
                             "actions": {
                                 "Delay_Find_Clone": {
@@ -553,9 +552,9 @@
                                         "uri": "@{parameters('JIRAHOST')}/rest/api/2/search",
                                         "method": "GET",
                                         "queries": {
-                                            "jql": "project = @{parameters('JiraProjectKey')} AND summary ~ \"@{outputs('Compute_Run_Times')['marker']}\" ORDER BY created DESC",
+                                            "jql": "project = @{parameters('JiraProjectKey')} AND issuetype = \"Technical change\" AND reporter = @{parameters('JIRAUserName')} AND created >= -10m ORDER BY created DESC",
                                             "maxResults": 1,
-                                            "fields": "key"
+                                            "fields": "key,created,summary"
                                         },
                                         "authentication": {
                                             "type": "Basic",
@@ -590,6 +589,23 @@
                                                         "properties": {
                                                             "key": {
                                                                 "type": "string"
+                                                            },
+                                                            "fields": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "created": {
+                                                                        "type": [
+                                                                            "string",
+                                                                            "null"
+                                                                        ]
+                                                                    },
+                                                                    "summary": {
+                                                                        "type": [
+                                                                            "string",
+                                                                            "null"
+                                                                        ]
+                                                                    }
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -606,9 +622,19 @@
                                 "Set_Clone_Key_If_Found": {
                                     "type": "If",
                                     "expression": {
-                                        "greater": [
-                                            "@length(coalesce(body('Parse_Search')?['issues'], json('[]')))",
-                                            0
+                                        "and": [
+                                            {
+                                                "greater": [
+                                                    "@length(coalesce(body('Parse_Search')?['issues'], json('[]')))",
+                                                    0
+                                                ]
+                                            },
+                                            {
+                                                "greaterOrEquals": [
+                                                    "@ticks(coalesce(first(body('Parse_Search')?['issues'])?['fields']?['created'], '1970-01-01T00:00:00.000+0000'))",
+                                                    "@ticks(outputs('Capture_Run_Start'))"
+                                                ]
+                                            }
                                         ]
                                     },
                                     "actions": {
@@ -637,6 +663,36 @@
                                 ]
                             }
                         },
+                        "Verify_Clone_Found": {
+                            "type": "If",
+                            "expression": {
+                                "equals": [
+                                    "@variables('Clone_Key')",
+                                    ""
+                                ]
+                            },
+                            "actions": {
+                                "Terminate_Clone_Not_Found": {
+                                    "type": "Terminate",
+                                    "inputs": {
+                                        "runStatus": "Failed",
+                                        "runError": {
+                                            "code": "CloneNotFound",
+                                            "message": "Clone not found by search within the polling window (reporter + created >= run start). The clone may not have indexed in time, or the JQL/permissions changed."
+                                        }
+                                    },
+                                    "runAfter": {}
+                                }
+                            },
+                            "else": {
+                                "actions": {}
+                            },
+                            "runAfter": {
+                                "Find_Clone_Key": [
+                                    "Succeeded"
+                                ]
+                            }
+                        },
                         "Override_Clone_Fields": {
                             "type": "Http",
                             "inputs": {
@@ -659,7 +715,7 @@
                                 }
                             },
                             "runAfter": {
-                                "Find_Clone_Key": [
+                                "Verify_Clone_Found": [
                                     "Succeeded"
                                 ]
                             },
