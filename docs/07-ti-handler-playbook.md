@@ -109,12 +109,18 @@ human-readable `displayStart`/`displayFinish` (`yyyy-MM-dd HH:mm`).
    `maxResults=1`, `fields=key,created,summary`. The reporter is the `sentinelsvc` service
    account and one run creates exactly one clone, so this is reliable — unlike a
    `summary ~ "<marker>"` text match, which Jira tokenises unreliably and which suffers
-   index lag. The key is captured into `Clone_Key` **only when** `issues[0]` exists **and**
-   `issues[0].fields.created >= Capture_Run_Start` (`ticks()` comparison) — the time guard
-   prevents picking up a stray ticket a previous run may have leaked inside the 10-minute
-   window. The loop delays 10 s, caps at **12 attempts / PT2M**, then `Verify_Clone_Found`
-   terminates the run with `CloneNotFound` if `Clone_Key` is still empty. All downstream
-   steps reference `variables('Clone_Key')` (unchanged name).
+   index lag. `Set_Clone_Key_If_Found` captures `issues[0].key` into `Clone_Key` **only when
+   the search returned an issue** (`issues` non-empty); an empty poll leaves the variable
+   empty and the loop continues. The `Until` exit condition is pure key-presence —
+   `@not(empty(variables('Clone_Key')))` — and the loop delays 10 s, caps at **12 attempts /
+   PT2M**, then `Verify_Clone_Found` terminates the run with `CloneNotFound` if `Clone_Key`
+   is still empty. All downstream steps reference `variables('Clone_Key')` (unchanged name).
+
+   > There is **no** `created >= run start` guard in the exit condition. An earlier version
+   > compared Jira's `created` against the run start time, but Jira DC returns `created` in
+   > server-local time with an offset (`…+0200`) while `utcNow()` is `…Z`; that comparison
+   > was both error-prone and redundant (the `created >= -10m` JQL already scopes the search),
+   > and it kept the loop from ever exiting. It was removed.
 
 ### Override on the clone (PUT, while still Open)
 

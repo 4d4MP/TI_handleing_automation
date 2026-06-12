@@ -532,7 +532,7 @@
                         },
                         "Find_Clone_Key": {
                             "type": "Until",
-                            "expression": "@not(equals(variables('Clone_Key'), ''))",
+                            "expression": "@not(empty(variables('Clone_Key')))",
                             "limit": {
                                 "count": 12,
                                 "timeout": "PT2M"
@@ -624,19 +624,9 @@
                                 "Set_Clone_Key_If_Found": {
                                     "type": "If",
                                     "expression": {
-                                        "and": [
-                                            {
-                                                "greater": [
-                                                    "@length(coalesce(body('Parse_Search')?['issues'], json('[]')))",
-                                                    0
-                                                ]
-                                            },
-                                            {
-                                                "greaterOrEquals": [
-                                                    "@ticks(coalesce(first(body('Parse_Search')?['issues'])?['fields']?['created'], '1970-01-01T00:00:00.000+0000'))",
-                                                    "@ticks(outputs('Capture_Run_Start'))"
-                                                ]
-                                            }
+                                        "greater": [
+                                            "@length(coalesce(body('Parse_Search')?['issues'], json('[]')))",
+                                            0
                                         ]
                                     },
                                     "actions": {
