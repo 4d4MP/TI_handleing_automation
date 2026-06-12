@@ -74,7 +74,7 @@ All knobs are workflow parameters and can be tweaked in the portal without redep
 ## Workflow at a glance
 
 1. Sentinel incident trigger → `Entities - Get IPs`; pull the Jira password from Key Vault (`secureData`); compute the run timestamps (`plannedStart`, `plannedEnd = +5 min`, `dateStamp`).
-2. **Create** the OPSLSY Technical change (`POST /issue` with `project`+`issuetype` only — the create screen is bare), **`PUT`** the descriptive fields onto the edit screen, then **walk it to Implementation** (Open → Planning → Implementation, with the Affected item set on the implementation transition) — all at run start, before any AbuseIPDB work.
+2. **Create** the OPSLSY Technical change (`POST /issue` with the full field whitelist — these fields are required on the create screen) and **walk it to Implementation** (Open → Planning → Implementation) — all at run start, before any AbuseIPDB work.
 3. Health-check AbuseIPDB (`/check?ipAddress=8.8.8.8`).
    - **Up** → per-IP `/check` (50-way), keep rows with `totalReports >= MinReports` and a non-excluded ISP → `Block_IPs` + rich `CSV_Rows`.
    - **Down** → fallback: build `Block_IPs` + `CSV_Rows` from the **raw** incident IP list. No separate ticket — the change already exists.

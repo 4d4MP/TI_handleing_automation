@@ -65,25 +65,13 @@ a `formatDateTime` mask) to avoid the literal-`T`/`+0000` escaping trap:
 
 The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
 
-### Why create is split into create + edit + transition
+### Fields set on create
 
-The **Create** screen for `OPSLSY` / issuetype `13507` is bare — it exposes only
-`project` and `issuetype`. A `POST /issue` that also sent `summary`, `description`, and
-the custom fields was rejected `400` with *"Field '…' cannot be set. It is not on the
-appropriate screen, or unknown."* for **every** field including `summary`/`description`
-(while `project`/`issuetype` were accepted). The descriptive fields live on the **Edit**
-screen, and `customfield_24305` lives on the **Start implementation** transition screen.
-
-So the playbook sets fields in three places:
-
-1. **`Create_OPSLSY_Change`** (`POST /issue`) — only `project` = `OPSLSY`
-   (`JiraProjectKey`) and `issuetype.id` = `13507` (`JiraIssueTypeId`). Nothing else is
-   on the create screen, so the create succeeds bare.
-2. **`Update_OPSLSY_Change`** (`PUT /issue/{key}`, runs before the walk) — the edit
-   screen fields below.
-3. **The Start implementation transition** — `customfield_24305` (see below).
-
-### Fields set on the edit PUT (`Update_OPSLSY_Change`)
+All of these are sent on the single `POST /issue` (`Create_OPSLSY_Change`). The OPSLSY /
+`13507` **create screen requires** summary, description, Planned start/end, Category,
+Type, Impact, Risk level, Reason, Owner, and Affected item, so they must be present at
+create — they cannot be deferred to a later edit. (A bare `project`+`issuetype` create is
+rejected `400` with `… is required` for each of those.)
 
 | Field | id | Value |
 |---|---|---|
@@ -103,33 +91,39 @@ So the playbook sets fields in three places:
 | Owner | `customfield_12707` | `{ "name": "u464549" }` (param `ChangeOwnerName`) |
 | Change manager | `customfield_22914` | `{ "name": "u761051" }` (Emil Pollak, param `ChangeManagerName`) |
 | Assignee | `assignee` | `{ "name": "u464549" }` (param `ChangeAssigneeName`) |
+| Affected item | `customfield_24305` | `[ { "key": "LCJ-37462" } ]` (param `AffectedItemKey`) |
 
-> If the edit PUT returns `400` with `cannot be set … not on the appropriate screen`
-> for any of these, that field is not on the OPSLSY edit screen and must move onto the
-> relevant **transition** screen instead. Confirm the exact edit-screen field set with
-> `GET /rest/api/2/issue/{key}/editmeta` (and `GET …/transitions?expand=transitions.fields`
-> for the transition screens) and re-home the offending field.
+Project = `OPSLSY` (`JiraProjectKey`), issuetype id = `13507` Technical change
+(`JiraIssueTypeId`).
 
-#### `customfield_24305` (Affected item) — set on the Start implementation transition
+> **A note on the screen errors.** An early attempt that sent these fields returned the
+> opposite error — *"Field '…' cannot be set. It is not on the appropriate screen, or
+> unknown."* for **every** field including `summary`. That blanket "not on screen" form
+> (covering even system fields) is Jira's signature for an **unresolved create context**
+> — e.g. the wrong/absent issue-type screen — not for these specific fields being off the
+> screen. Against the real OPSLSY / `13507` create screen the fields are simply
+> **required**, so they all go on create. If the "cannot be set" form ever returns, treat
+> it as a create-context/screen-scheme problem (verify the issue type and its create
+> screen via `GET /rest/api/2/issue/createmeta?projectKeys=OPSLSY&issuetypeIds=13507&expand=projects.issuetypes.fields`),
+> not as a reason to move fields off create.
 
-`customfield_24305` is an Elements Connect `rlabs-customfield-default-object` field and
-is **required to pass the `Start implementation` transition** — it is on that
-transition's screen, not the create or edit screen. The playbook therefore sends it in
-the `fields` of the **Implementation** transition POST (`Post_Transition_Implementation`),
-not at create:
+#### `customfield_24305` (Affected item) — write shape
+
+`customfield_24305` is an Elements Connect `rlabs-customfield-default-object` field and is
+**required on the create screen** (and is what the `Start implementation` transition
+validator checks — already satisfied once set at create, so it is **not** re-sent on the
+transition). Its REST *write* shape differs from its read shape — the read form
+`["…(LCJ-37462)"]` returns `expected Object` on write — so the object form with the key
+`LCJ-37462` is used, held as the single named constant `AffectedItemKey`:
 
 ```json
 "customfield_24305": [ { "key": "LCJ-37462" } ]
 ```
 
-Its REST *write* shape differs from its read shape — the read form `["…(LCJ-37462)"]`
-returns `expected Object` on write — so the object form with the key `LCJ-37462` is
-used (held as the single named constant `AffectedItemKey`).
-
-> ⚠ **Write-shape not yet confirmed against a live 204.** This is the more likely of
-> the two candidates; the alternative is `["LCJ-37462"]`. Confirm by transitioning a
-> non-closed test Technical change with each shape, keep whichever is accepted, and
-> update both `playbook/workflow.json` and this section.
+> ⚠ **Write-shape not yet confirmed against a live 201.** This is the more likely of the
+> two candidates; the alternative is `["LCJ-37462"]`. If create returns
+> `data was not an object` / `expected Object` for `customfield_24305`, switch
+> `AffectedItemKey`'s usage to the bare-string array form and update this section.
 
 ### Description body
 
@@ -174,7 +168,7 @@ implementation review→Closed `111`. Standard Change skips the approval stages.
 | Walk step | target status | POST body fields |
 |---|---|---|
 | 1. Planning | `Planning` | *(none — just `transition.id`)* |
-| 2. Implementation | `Implementation` | `customfield_24305 = [ { "key": "LCJ-37462" } ]` (Affected item — required by this transition's validator; the edit PUT has already set Category/Type/Reason/Impact/Risk/Owner/Change manager/Change tested/Rollback/Validation) |
+| 2. Implementation | `Implementation` | *(none — the create already set Category/Type/Reason/Impact/Risk/Owner/Affected item/Change manager/Change tested/Rollback/Validation, so the transition's screen + validators are satisfied)* |
 | 3. Post implementation review | `Post implementation review` | `resolution = { "name": "Successful" }`, `customfield_23600 = actualStart`, `customfield_23601 = actualFinish` *(actual start/finish are only settable on this transition screen, not at create)* |
 | 4. Closed | `Closed` | `resolution = { "name": "Successful" }` |
 

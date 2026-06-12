@@ -74,15 +74,15 @@ The managed identity does **not** need any permission on the AbuseIPDB connectio
 
 ## The change ticket — OPSLSY Technical change
 
-`OPSLSY-75376` is the field-rich template. The playbook does **not** call a clone endpoint, and it does **not** set everything at create — the OPSLSY/Technical-change **create screen is bare** (only `project` + `issuetype`), so a `POST /issue` carrying summary/description/customfields is rejected `400` (*"… not on the appropriate screen"*) for every field. Fields are therefore set in three places: `Create_OPSLSY_Change` (`POST /issue`, project `OPSLSY` + issuetype `13507` only) → `Update_OPSLSY_Change` (`PUT /issue/{key}`, the edit-screen fields: summary/description with run timestamps, planned start/end, category/type/impact/risk/reason/change-tested/rollback/validation/test-reference, owner/assignee/change-manager) → the **Start implementation** transition (the Affected item). Computed/scripted template fields are not copied. Full field table and the description body are in `docs/07-ti-handler-playbook.md`.
+`OPSLSY-75376` is the field-rich template. The playbook does **not** call a clone endpoint; it `POST /issue` (`Create_OPSLSY_Change`) setting the field whitelist directly. The OPSLSY / `13507` **create screen requires** summary, description, planned start/end, category, type, impact, risk, reason, owner, and the Affected item, so all of them are set on create (a bare `project`+`issuetype` create is rejected `400 … is required`). Computed/scripted template fields are not copied. Full field table and the description body are in `docs/07-ti-handler-playbook.md`.
 
-The **Affected item** `customfield_24305` (Elements Connect object) is required by the *Start implementation* transition's validator, so it is sent in that transition's `fields` (not at create/edit), written as `[ { "key": "LCJ-37462" } ]` (see the doc for the unconfirmed-shape note).
+The **Affected item** `customfield_24305` (Elements Connect object) is required on the create screen — and is the field the *Start implementation* transition validator checks, already satisfied once set at create — so it is sent at create as `[ { "key": "LCJ-37462" } ]` and not re-sent on the transition (see the doc for the unconfirmed-shape note).
 
 ### The walk (name-driven)
 
 The transition ids are per-workflow and drift between test and prod, so the walk never hardcodes them. At each step it `GET`s `/issue/{key}/transitions?expand=transitions.fields`, filters to the transition whose `to.name` contains the desired status name (case-insensitive) **and** whose `name` does not contain `revoke / withdraw / re-plan / reject / cancel / update cmdb`, then `POST`s `{transition:{id}, fields:{…}}`. Because heavy Trackspace transitions often drop the HTTP connection but still commit, each step then **polls** `GET /issue/{key}?fields=status` in an `Until` (10 s × up to 60 / PT10M) until the status lands, and the poll runs even if the POST is reported `Failed`/`TimedOut`.
 
-Per-transition `fields`: Planning sends none; Implementation sends `customfield_24305` (Affected item, required by its validator); Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` = actual start/finish (only settable on that screen); Closed sends `resolution=Successful`.
+Per-transition `fields`: Planning and Implementation send none (the create already populated the fields their screens/validators need, including the Affected item); Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` = actual start/finish (only settable on that screen); Closed sends `resolution=Successful`.
 
 ## Filter semantics
 
