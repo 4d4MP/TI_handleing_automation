@@ -192,6 +192,28 @@ Blocked IPs can be found in the attachment.
 
 (The `Time frame` line was changed 30 → 5 minutes to match the planned window.)
 
+### Approval sub-task (required before Implementation)
+
+The *Start implementation* transition has a validator that rejects the move unless the
+issue **has at least one sub-task** (`"Transition is allowed only if the issue has sub-task"`).
+`Create_Approval_Subtask` (`POST /rest/api/2/issue`, runs after `Override_Clone_Fields`,
+before `Walk_to_Planning`) creates one on the clone:
+
+| field | value |
+| --- | --- |
+| `project.key` | `{JiraProjectKey}` |
+| `parent.key` | `{Clone_Key}` |
+| `issuetype.name` | `{SubtaskIssueTypeName}` (default `Approval sub-task`) |
+| `summary` | `Manual review of the blocked IPs` |
+| `assignee.name` | `{SubtaskAssigneeName}` — Jira **login**, not display name |
+| `description` | `This is the manual review to decide whether the automation was successful.` |
+
+The create screen marks Assignee required, so `SubtaskAssigneeName` must be a real login
+(the display name `LSYH, BUD SECOPS` is **not** accepted by REST). If the create fails
+(bad login, missing sub-task type), `Walk_to_Planning` won't run and the whole run fails
+with the create error — by design, so the problem surfaces immediately. Reporter defaults
+to `sentinelsvc`; security level is inherited from the parent.
+
 ---
 
 ## The walk (name-driven, id-agnostic)
@@ -276,6 +298,8 @@ Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
 |---|---|
 | `JiraProjectKey` | `OPSLSY` (used in the find-clone-by-search JQL) |
 | `TemplateIssueKey` | `OPSLSY-75376` (the change cloned each run) |
+| `SubtaskIssueTypeName` | `Approval sub-task` (the required pre-Implementation sub-task) |
+| `SubtaskAssigneeName` | *(empty — set to a Jira login)* assignee for the approval sub-task |
 | `StatusPlanningName` | `Planning` |
 | `StatusImplementationName` | `Implementation` |
 | `StatusPostImplReviewName` | `Post implementation review` |

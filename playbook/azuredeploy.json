@@ -69,6 +69,20 @@
                 "description": "Template Technical change that is server-side cloned each run (carries the Insight/Assets Affected item customfield_24305, which cannot be set via REST). Its numeric id is resolved at runtime."
             }
         },
+        "SubtaskIssueTypeName": {
+            "type": "string",
+            "defaultValue": "Approval sub-task",
+            "metadata": {
+                "description": "Issue-type name for the required approval sub-task created on the clone before the Implementation transition."
+            }
+        },
+        "SubtaskAssigneeName": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Jira login (username, not display name) assigned to the approval sub-task. Required by the sub-task create screen."
+            }
+        },
         "StatusPlanningName": {
             "type": "string",
             "defaultValue": "Planning",
@@ -231,6 +245,14 @@
                         "TemplateIssueKey": {
                             "type": "String",
                             "defaultValue": "[parameters('TemplateIssueKey')]"
+                        },
+                        "SubtaskIssueTypeName": {
+                            "type": "String",
+                            "defaultValue": "[parameters('SubtaskIssueTypeName')]"
+                        },
+                        "SubtaskAssigneeName": {
+                            "type": "String",
+                            "defaultValue": "[parameters('SubtaskAssigneeName')]"
                         },
                         "StatusPlanningName": {
                             "type": "String",
@@ -1165,7 +1187,7 @@
                                 }
                             },
                             "runAfter": {
-                                "Override_Clone_Fields": [
+                                "Create_Approval_Subtask": [
                                     "Succeeded"
                                 ]
                             }
@@ -3019,6 +3041,52 @@
                                 "Build_Cookie_Parts": [
                                     "Succeeded"
                                 ]
+                            }
+                        },
+                        "Create_Approval_Subtask": {
+                            "type": "Http",
+                            "inputs": {
+                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                                "method": "POST",
+                                "headers": {
+                                    "Content-Type": "application/json",
+                                    "Cookie": "@{variables('Affinity_Cookie')}"
+                                },
+                                "body": {
+                                    "fields": {
+                                        "project": {
+                                            "key": "@{parameters('JiraProjectKey')}"
+                                        },
+                                        "parent": {
+                                            "key": "@{variables('Clone_Key')}"
+                                        },
+                                        "issuetype": {
+                                            "name": "@{parameters('SubtaskIssueTypeName')}"
+                                        },
+                                        "summary": "Manual review of the blocked IPs",
+                                        "assignee": {
+                                            "name": "@{parameters('SubtaskAssigneeName')}"
+                                        },
+                                        "description": "This is the manual review to decide whether the automation was successful."
+                                    }
+                                },
+                                "authentication": {
+                                    "type": "Basic",
+                                    "username": "@parameters('JIRAUserName')",
+                                    "password": "@body('Get_Jira_password')?['value']"
+                                }
+                            },
+                            "runAfter": {
+                                "Override_Clone_Fields": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "runtimeConfiguration": {
+                                "secureData": {
+                                    "properties": [
+                                        "inputs"
+                                    ]
+                                }
                             }
                         }
                     },

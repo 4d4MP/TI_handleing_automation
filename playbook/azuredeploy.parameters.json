@@ -26,6 +26,12 @@
         "TemplateIssueKey": {
             "value": "OPSLSY-75376"
         },
+        "SubtaskIssueTypeName": {
+            "value": "Approval sub-task"
+        },
+        "SubtaskAssigneeName": {
+            "value": "REPLACE_WITH_ASSIGNEE_LOGIN"
+        },
         "StatusPlanningName": {
             "value": "Planning"
         },

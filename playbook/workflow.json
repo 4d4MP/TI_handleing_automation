@@ -901,7 +901,7 @@
                     }
                 },
                 "runAfter": {
-                    "Override_Clone_Fields": [
+                    "Create_Approval_Subtask": [
                         "Succeeded"
                     ]
                 }
@@ -2756,6 +2756,52 @@
                         "Succeeded"
                     ]
                 }
+            },
+            "Create_Approval_Subtask": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue",
+                    "method": "POST",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "Cookie": "@{variables('Affinity_Cookie')}"
+                    },
+                    "body": {
+                        "fields": {
+                            "project": {
+                                "key": "@{parameters('JiraProjectKey')}"
+                            },
+                            "parent": {
+                                "key": "@{variables('Clone_Key')}"
+                            },
+                            "issuetype": {
+                                "name": "@{parameters('SubtaskIssueTypeName')}"
+                            },
+                            "summary": "Manual review of the blocked IPs",
+                            "assignee": {
+                                "name": "@{parameters('SubtaskAssigneeName')}"
+                            },
+                            "description": "This is the manual review to decide whether the automation was successful."
+                        }
+                    },
+                    "authentication": {
+                        "type": "Basic",
+                        "username": "@parameters('JIRAUserName')",
+                        "password": "@body('Get_Jira_password')?['value']"
+                    }
+                },
+                "runAfter": {
+                    "Override_Clone_Fields": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "inputs"
+                        ]
+                    }
+                }
             }
         },
         "outputs": {},
@@ -2778,6 +2824,14 @@
             },
             "TemplateIssueKey": {
                 "defaultValue": "OPSLSY-75376",
+                "type": "String"
+            },
+            "SubtaskIssueTypeName": {
+                "defaultValue": "Approval sub-task",
+                "type": "String"
+            },
+            "SubtaskAssigneeName": {
+                "defaultValue": "",
                 "type": "String"
             },
             "StatusPlanningName": {
