@@ -274,8 +274,8 @@
                 "type": "Until",
                 "expression": "@not(empty(variables('Clone_Key')))",
                 "limit": {
-                    "count": 12,
-                    "timeout": "PT2M"
+                    "count": 18,
+                    "timeout": "PT4M"
                 },
                 "actions": {
                     "Delay_Find_Clone": {
@@ -305,6 +305,9 @@
                             },
                             "headers": {
                                 "Cookie": "@{variables('Affinity_Cookie')}"
+                            },
+                            "retryPolicy": {
+                                "type": "none"
                             }
                         },
                         "runAfter": {

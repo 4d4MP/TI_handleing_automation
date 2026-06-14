@@ -142,9 +142,17 @@ The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
    index lag. `Set_Clone_Key_If_Found` captures `issues[0].key` into `Clone_Key` **only when
    the search returned an issue** (`issues` non-empty); an empty poll leaves the variable
    empty and the loop continues. The `Until` exit condition is pure key-presence —
-   `@not(empty(variables('Clone_Key')))` — and the loop delays 10 s, caps at **12 attempts /
-   PT2M**, then `Verify_Clone_Found` terminates the run with `CloneNotFound` if `Clone_Key`
+   `@not(empty(variables('Clone_Key')))` — and the loop delays 10 s, caps at **18 attempts /
+   PT4M**, then `Verify_Clone_Found` terminates the run with `CloneNotFound` if `Clone_Key`
    is still empty. All downstream steps reference `variables('Clone_Key')` (unchanged name).
+
+   > `Search_For_Clone` is set to **`retryPolicy: none`**. With the default policy a single
+   > slow or gateway-`307`'d search retries 4× with back-off (~2 min/try, ~10 min total),
+   > which both wastes the run and makes the `Until` sail far past its `PT4M` cap (observed:
+   > one iteration burning ~11 min). One-shot attempts keep each poll fast and bounded, so
+   > the loop budget is the real ceiling. (The affinity `Cookie` header — see above — is what
+   > stops the search `307`-ing in the first place; `retryPolicy: none` is the belt-and-braces
+   > guard for a slow or transiently-failing attempt.)
 
    > There is **no** `created >= run start` guard in the exit condition. An earlier version
    > compared Jira's `created` against the run start time, but Jira DC returns `created` in
