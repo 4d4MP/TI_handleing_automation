@@ -2631,7 +2631,7 @@
         "outputs": {},
         "parameters": {
             "JIRAHOST": {
-                "defaultValue": "https://trackspace.lhsystems.com",
+                "defaultValue": "https://int-trackspace.lhsystems.com",
                 "type": "String"
             },
             "JIRAUserName": {

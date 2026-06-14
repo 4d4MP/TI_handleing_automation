@@ -36,9 +36,9 @@
         },
         "JIRAHOST": {
             "type": "string",
-            "defaultValue": "https://trackspace.lhsystems.com",
+            "defaultValue": "https://int-trackspace.lhsystems.com",
             "metadata": {
-                "description": "Trackspace base URL (also the host for the CloneIssueDetails.jspa servlet)."
+                "description": "Trackspace base URL (also the host for the CloneIssueDetails.jspa servlet). Currently the INT environment; switch to https://trackspace.lhsystems.com for production."
             }
         },
         "JIRAUserName": {

@@ -27,8 +27,9 @@ shows the cloned issue key in the `Find_Clone_Key` step (the `Clone_Key` variabl
 it in Trackspace:
 
 ```
-https://trackspace.lhsystems.com/browse/OPSLSY-<n>
+https://int-trackspace.lhsystems.com/browse/OPSLSY-<n>
 ```
+(INT environment — the current `JIRAHOST`; use `https://trackspace.lhsystems.com` for production.)
 
 The attachment `sentinel_blocked_ips_<incident-number>.csv` lists the IPs that were
 pushed to the blocklist (enriched rows on the normal path, plain IPs on the AbuseIPDB

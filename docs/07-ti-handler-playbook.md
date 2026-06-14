@@ -38,7 +38,8 @@ work** so the ticket is never stranded if enrichment fails.
 
 All Trackspace calls use **Basic auth** — service account `sentinelsvc` with the
 Key Vault secret `sentinelsvc` (read via the `keyvault-TI-handler` connection,
-flagged `secureData`). Base URL `https://trackspace.lhsystems.com/rest/api/2/`.
+flagged `secureData`). Base URL `https://int-trackspace.lhsystems.com/rest/api/2/` (the
+INT environment, set via `JIRAHOST`; switch to `https://trackspace.lhsystems.com` for production).
 
 ---
 
