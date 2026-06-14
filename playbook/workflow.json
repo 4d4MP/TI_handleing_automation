@@ -166,10 +166,13 @@
                         "type": "Basic",
                         "username": "@parameters('JIRAUserName')",
                         "password": "@body('Get_Jira_password')?['value']"
+                    },
+                    "headers": {
+                        "Cookie": "@{variables('Affinity_Cookie')}"
                     }
                 },
                 "runAfter": {
-                    "Get_Jira_password": [
+                    "Set_Affinity_Cookie": [
                         "Succeeded"
                     ]
                 },
@@ -210,7 +213,8 @@
                     "method": "POST",
                     "headers": {
                         "X-Atlassian-Token": "no-check",
-                        "Content-Type": "application/x-www-form-urlencoded"
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Cookie": "@{variables('Affinity_Cookie')}"
                     },
                     "body": "id=@{body('Parse_Template_Id')?['id']}&summary=@{encodeUriComponent(outputs('Compute_Run_Times')['summary'])}&cloneAttachments=false&cloneSubTasks=false&cloneLinks=false",
                     "authentication": {
@@ -298,6 +302,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {
@@ -427,7 +434,8 @@
                     "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}",
                     "method": "PUT",
                     "headers": {
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "Cookie": "@{variables('Affinity_Cookie')}"
                     },
                     "body": {
                         "fields": {
@@ -470,6 +478,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {},
@@ -558,6 +569,9 @@
                                         "type": "Basic",
                                         "username": "@parameters('JIRAUserName')",
                                         "password": "@body('Get_Jira_password')?['value']"
+                                    },
+                                    "headers": {
+                                        "Cookie": "@{variables('Affinity_Cookie')}"
                                     }
                                 },
                                 "runAfter": {},
@@ -643,7 +657,8 @@
                             "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "POST",
                             "headers": {
-                                "Content-Type": "application/json"
+                                "Content-Type": "application/json",
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             },
                             "body": {
                                 "transition": {
@@ -699,6 +714,9 @@
                                         "type": "Basic",
                                         "username": "@parameters('JIRAUserName')",
                                         "password": "@body('Get_Jira_password')?['value']"
+                                    },
+                                    "headers": {
+                                        "Cookie": "@{variables('Affinity_Cookie')}"
                                     }
                                 },
                                 "runAfter": {
@@ -778,6 +796,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {
@@ -897,6 +918,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {},
@@ -985,6 +1009,9 @@
                                         "type": "Basic",
                                         "username": "@parameters('JIRAUserName')",
                                         "password": "@body('Get_Jira_password')?['value']"
+                                    },
+                                    "headers": {
+                                        "Cookie": "@{variables('Affinity_Cookie')}"
                                     }
                                 },
                                 "runAfter": {},
@@ -1070,7 +1097,8 @@
                             "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "POST",
                             "headers": {
-                                "Content-Type": "application/json"
+                                "Content-Type": "application/json",
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             },
                             "body": {
                                 "transition": {
@@ -1130,6 +1158,9 @@
                                         "type": "Basic",
                                         "username": "@parameters('JIRAUserName')",
                                         "password": "@body('Get_Jira_password')?['value']"
+                                    },
+                                    "headers": {
+                                        "Cookie": "@{variables('Affinity_Cookie')}"
                                     }
                                 },
                                 "runAfter": {
@@ -1209,6 +1240,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {
@@ -1728,7 +1762,8 @@
                     "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/attachments",
                     "method": "POST",
                     "headers": {
-                        "X-Atlassian-Token": "no-check"
+                        "X-Atlassian-Token": "no-check",
+                        "Cookie": "@{variables('Affinity_Cookie')}"
                     },
                     "body": {
                         "$content-type": "multipart/form-data",
@@ -1776,6 +1811,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {},
@@ -1864,6 +1902,9 @@
                                         "type": "Basic",
                                         "username": "@parameters('JIRAUserName')",
                                         "password": "@body('Get_Jira_password')?['value']"
+                                    },
+                                    "headers": {
+                                        "Cookie": "@{variables('Affinity_Cookie')}"
                                     }
                                 },
                                 "runAfter": {},
@@ -1949,7 +1990,8 @@
                             "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "POST",
                             "headers": {
-                                "Content-Type": "application/json"
+                                "Content-Type": "application/json",
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             },
                             "body": {
                                 "transition": {
@@ -2012,6 +2054,9 @@
                                         "type": "Basic",
                                         "username": "@parameters('JIRAUserName')",
                                         "password": "@body('Get_Jira_password')?['value']"
+                                    },
+                                    "headers": {
+                                        "Cookie": "@{variables('Affinity_Cookie')}"
                                     }
                                 },
                                 "runAfter": {
@@ -2091,6 +2136,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {
@@ -2210,6 +2258,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {},
@@ -2298,6 +2349,9 @@
                                         "type": "Basic",
                                         "username": "@parameters('JIRAUserName')",
                                         "password": "@body('Get_Jira_password')?['value']"
+                                    },
+                                    "headers": {
+                                        "Cookie": "@{variables('Affinity_Cookie')}"
                                     }
                                 },
                                 "runAfter": {},
@@ -2383,7 +2437,8 @@
                             "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/transitions",
                             "method": "POST",
                             "headers": {
-                                "Content-Type": "application/json"
+                                "Content-Type": "application/json",
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             },
                             "body": {
                                 "transition": {
@@ -2444,6 +2499,9 @@
                                         "type": "Basic",
                                         "username": "@parameters('JIRAUserName')",
                                         "password": "@body('Get_Jira_password')?['value']"
+                                    },
+                                    "headers": {
+                                        "Cookie": "@{variables('Affinity_Cookie')}"
                                     }
                                 },
                                 "runAfter": {
@@ -2523,6 +2581,9 @@
                                 "type": "Basic",
                                 "username": "@parameters('JIRAUserName')",
                                 "password": "@body('Get_Jira_password')?['value']"
+                            },
+                            "headers": {
+                                "Cookie": "@{variables('Affinity_Cookie')}"
                             }
                         },
                         "runAfter": {
@@ -2623,6 +2684,72 @@
                 },
                 "runAfter": {
                     "Walk_to_Post_Implementation_Review": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Initialize_Affinity_Cookie": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Affinity_Cookie",
+                            "type": "string",
+                            "value": ""
+                        }
+                    ]
+                },
+                "runAfter": {
+                    "Initialize_Clone_Key": [
+                        "Succeeded"
+                    ]
+                }
+            },
+            "Prime_Affinity_Cookie": {
+                "type": "Http",
+                "inputs": {
+                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/serverInfo",
+                    "method": "GET",
+                    "authentication": {
+                        "type": "Basic",
+                        "username": "@parameters('JIRAUserName')",
+                        "password": "@body('Get_Jira_password')?['value']"
+                    }
+                },
+                "runAfter": {
+                    "Get_Jira_password": [
+                        "Succeeded"
+                    ]
+                },
+                "runtimeConfiguration": {
+                    "secureData": {
+                        "properties": [
+                            "inputs"
+                        ]
+                    }
+                }
+            },
+            "Build_Cookie_Parts": {
+                "type": "Select",
+                "inputs": {
+                    "from": "@split(coalesce(outputs('Prime_Affinity_Cookie')?['headers']?['Set-Cookie'], ''), ',')",
+                    "select": "@trim(first(split(item(), ';')))"
+                },
+                "runAfter": {
+                    "Prime_Affinity_Cookie": [
+                        "Succeeded",
+                        "Failed"
+                    ]
+                }
+            },
+            "Set_Affinity_Cookie": {
+                "type": "SetVariable",
+                "inputs": {
+                    "name": "Affinity_Cookie",
+                    "value": "@join(body('Build_Cookie_Parts'), '; ')"
+                },
+                "runAfter": {
+                    "Build_Cookie_Parts": [
                         "Succeeded"
                     ]
                 }

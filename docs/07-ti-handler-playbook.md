@@ -41,6 +41,27 @@ Key Vault secret `sentinelsvc` (read via the `keyvault-TI-handler` connection,
 flagged `secureData`). Base URL `https://int-trackspace.lhsystems.com/rest/api/2/` (the
 INT environment, set via `JIRAHOST`; switch to `https://trackspace.lhsystems.com` for production).
 
+### Gateway session affinity (the `Cookie` header)
+
+INT Trackspace sits behind an Azure **Application Gateway with cookie-based session
+affinity**: the first request without the affinity cookie gets a **`307` redirect to
+itself** that plants `ApplicationGatewayAffinity`/`…CORS` (and `JSESSIONID`) cookies, and
+the Logic App HTTP action does not transparently re-issue with them — so every Jira call
+would otherwise fail with `307`. The playbook handles this itself:
+
+1. `Prime_Affinity_Cookie` — a `GET /rest/api/2/serverInfo` that is *expected* to `307`
+   (its failure is tolerated); it exists only to collect the gateway's `Set-Cookie`.
+2. `Build_Cookie_Parts` + `Set_Affinity_Cookie` — split that `Set-Cookie` on `,`, take the
+   `name=value` before the first `;` of each, and join them with `; ` into the
+   `Affinity_Cookie` variable (e.g. `ApplicationGatewayAffinity=…; ApplicationGatewayAffinityCORS=…; JSESSIONID=…`).
+3. **Every** Jira HTTP call (`Resolve_Template_Id` onward — clone, search, all transition
+   GET/POST/status, attach) sends `Cookie: @{variables('Affinity_Cookie')}`, so the gateway
+   serves it on the pinned backend instead of `307`-ing. (Storage/AbuseIPDB/KV calls do not
+   get the cookie.)
+
+If the live (prod) gateway doesn't do cookie affinity the cookie is simply empty/ignored
+and the calls work unchanged.
+
 ---
 
 ## The ticket — clone of OPSLSY-75376 (do NOT `POST /issue`)
