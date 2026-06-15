@@ -196,15 +196,21 @@ Blocked IPs can be found in the attachment.
 
 The *Start implementation* transition has a validator that rejects the move unless the
 issue **has at least one sub-task** (`"Transition is allowed only if the issue has sub-task"`).
-Two actions run after `Override_Clone_Fields` and before `Walk_to_Planning`:
+Three actions run after `Override_Clone_Fields` and before `Walk_to_Planning`:
 
-`Find_Assignee_Account` (`GET /rest/api/2/user/assignable/search?issueKey={Clone_Key}&query={SubtaskAssigneeName}`)
+`Find_Assignee_Account` (`GET /rest/api/2/user/assignable/search?issueKey={Clone_Key}&username={SubtaskAssigneeName}`)
 resolves the **real Jira login** for the assignee. Jira REST sets `assignee` by `name` (the
 login), **not** by display name or email — passing the email directly fails with
-`User '…' does not exist`. The search matches the query against username/display/email and
-returns the user object, and the create reads `first(body('Find_Assignee_Account'))?['name']`.
-So `SubtaskAssigneeName` can stay a human-friendly value (e.g. an email) and the login is
-looked up at runtime.
+`User '…' does not exist`. This is Jira **Server/Data Center**, so the filter parameter is
+**`username`** (the Cloud-only `query` is silently ignored by Server, which then returns the
+*first assignable user* — i.e. a random colleague). The `username` filter matches against
+username/display/email; the create reads `first(body('Find_Assignee_Account'))?['name']`, so
+`SubtaskAssigneeName` can stay a human-friendly value (e.g. an email) and the login is looked
+up at runtime.
+
+`Assert_Assignee_Found` fails the run with `AssigneeNotFound` if the filtered search returned
+no user (`length == 0`), so a non-matching `SubtaskAssigneeName` surfaces a clear error
+instead of mis-assigning.
 
 `Create_Approval_Subtask` (`POST /rest/api/2/issue`) then creates the sub-task on the clone:
 
@@ -218,10 +224,10 @@ looked up at runtime.
 | `description` | `This is the manual review to decide whether the automation was successful.` |
 
 If the lookup returns no user (`SubtaskAssigneeName` matches nobody, or the service account
-lacks *Browse users*), `assignee.name` resolves empty and `Create_Approval_Subtask` fails with
-the assignee error; if the create fails for any reason, `Walk_to_Planning` won't run and the
-whole run fails — by design, so the problem surfaces immediately. Reporter defaults to
-`sentinelsvc`; security level is inherited from the parent.
+lacks *Browse users*), `Assert_Assignee_Found` terminates the run; if the create fails for any
+other reason, `Walk_to_Planning` won't run and the whole run fails — by design, so the problem
+surfaces immediately. Reporter defaults to `sentinelsvc`; security level is inherited from the
+parent.
 
 ---
 
