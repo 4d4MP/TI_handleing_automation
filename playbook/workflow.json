@@ -2764,37 +2764,10 @@
                             },
                             "summary": "Manual review of the blocked IPs",
                             "assignee": {
-                                "name": "@{first(body('Find_Assignee_Account'))?['name']}"
+                                "name": "@{parameters('SubtaskAssigneeName')}"
                             },
                             "description": "This is the manual review to decide whether the automation was successful."
                         }
-                    },
-                    "authentication": {
-                        "type": "Basic",
-                        "username": "@parameters('JIRAUserName')",
-                        "password": "@body('Get_Jira_password')?['value']"
-                    }
-                },
-                "runAfter": {
-                    "Assert_Assignee_Found": [
-                        "Succeeded"
-                    ]
-                },
-                "runtimeConfiguration": {
-                    "secureData": {
-                        "properties": [
-                            "inputs"
-                        ]
-                    }
-                }
-            },
-            "Find_Assignee_Account": {
-                "type": "Http",
-                "inputs": {
-                    "uri": "@{parameters('JIRAHOST')}/rest/api/2/user/assignable/search?issueKey=@{variables('Clone_Key')}&username=@{encodeUriComponent(parameters('SubtaskAssigneeName'))}&maxResults=1",
-                    "method": "GET",
-                    "headers": {
-                        "Cookie": "@{variables('Affinity_Cookie')}"
                     },
                     "authentication": {
                         "type": "Basic",
@@ -2813,36 +2786,6 @@
                             "inputs"
                         ]
                     }
-                }
-            },
-            "Assert_Assignee_Found": {
-                "type": "If",
-                "expression": {
-                    "equals": [
-                        "@length(coalesce(body('Find_Assignee_Account'), json('[]')))",
-                        0
-                    ]
-                },
-                "actions": {
-                    "Terminate_No_Assignee": {
-                        "type": "Terminate",
-                        "inputs": {
-                            "runStatus": "Failed",
-                            "runError": {
-                                "code": "AssigneeNotFound",
-                                "message": "No Jira user matched SubtaskAssigneeName '@{parameters('SubtaskAssigneeName')}' via assignable-user search on @{variables('Clone_Key')}; cannot assign the approval sub-task."
-                            }
-                        },
-                        "runAfter": {}
-                    }
-                },
-                "else": {
-                    "actions": {}
-                },
-                "runAfter": {
-                    "Find_Assignee_Account": [
-                        "Succeeded"
-                    ]
                 }
             }
         },
@@ -2873,7 +2816,7 @@
                 "type": "String"
             },
             "SubtaskAssigneeName": {
-                "defaultValue": "lsyh.secops@lhsystems.com",
+                "defaultValue": "secops",
                 "type": "String"
             },
             "StatusPlanningName": {

@@ -201,23 +201,9 @@ Blocked IPs can be found in the attachment.
 
 The *Start implementation* transition has a validator that rejects the move unless the
 issue **has at least one sub-task** (`"Transition is allowed only if the issue has sub-task"`).
-Three actions run after `Override_Clone_Fields` and before `Walk_to_Planning`:
+`Create_Approval_Subtask` runs after `Override_Clone_Fields` and before `Walk_to_Planning`.
 
-`Find_Assignee_Account` (`GET /rest/api/2/user/assignable/search?issueKey={Clone_Key}&username={SubtaskAssigneeName}`)
-resolves the **real Jira login** for the assignee. Jira REST sets `assignee` by `name` (the
-login), **not** by display name or email — passing the email directly fails with
-`User '…' does not exist`. This is Jira **Server/Data Center**, so the filter parameter is
-**`username`** (the Cloud-only `query` is silently ignored by Server, which then returns the
-*first assignable user* — i.e. a random colleague). The `username` filter matches against
-username/display/email; the create reads `first(body('Find_Assignee_Account'))?['name']`, so
-`SubtaskAssigneeName` can stay a human-friendly value (e.g. an email) and the login is looked
-up at runtime.
-
-`Assert_Assignee_Found` fails the run with `AssigneeNotFound` if the filtered search returned
-no user (`length == 0`), so a non-matching `SubtaskAssigneeName` surfaces a clear error
-instead of mis-assigning.
-
-`Create_Approval_Subtask` (`POST /rest/api/2/issue`) then creates the sub-task on the clone:
+`Create_Approval_Subtask` (`POST /rest/api/2/issue`) creates the sub-task on the clone:
 
 | field | value |
 | --- | --- |
@@ -225,14 +211,19 @@ instead of mis-assigning.
 | `parent.key` | `{Clone_Key}` |
 | `issuetype.name` | `{SubtaskIssueTypeName}` (default `Approval sub-task`) |
 | `summary` | `Manual review of the blocked IPs` |
-| `assignee.name` | `first(body('Find_Assignee_Account'))?['name']` (resolved login) |
+| `assignee.name` | `{SubtaskAssigneeName}` — the Jira **login**, default `secops` |
 | `description` | `This is the manual review to decide whether the automation was successful.` |
 
-If the lookup returns no user (`SubtaskAssigneeName` matches nobody, or the service account
-lacks *Browse users*), `Assert_Assignee_Found` terminates the run; if the create fails for any
-other reason, `Walk_to_Planning` won't run and the whole run fails — by design, so the problem
-surfaces immediately. Reporter defaults to `sentinelsvc`; security level is inherited from the
-parent.
+Jira REST sets `assignee` by login `name`, **not** by display name or email, so
+`SubtaskAssigneeName` must be the login (`secops` for "LSYH, BUD SECOPS"; the email
+`lsyh.secops@lhsystems.com` is **not** accepted). We assign it **directly** — an earlier
+version looked the login up at runtime via `user/assignable/search?username=`, but the
+server-side filter makes Jira DC run a directory (LDAP) search that exceeds the Logic Apps
+**fixed 120 s HTTP timeout** (it can't be raised on Consumption), so the action always timed
+out. Using the literal login removes the lookup entirely. If the create fails (wrong login,
+missing sub-task type), `Walk_to_Planning` won't run and the whole run fails — by design, so
+the problem surfaces immediately. Reporter defaults to `sentinelsvc`; security level is
+inherited from the parent.
 
 ---
 
@@ -319,7 +310,7 @@ Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
 | `JiraProjectKey` | `OPSLSY` (used in the find-clone-by-search JQL) |
 | `TemplateIssueKey` | `OPSLSY-75376` (the change cloned each run) |
 | `SubtaskIssueTypeName` | `Approval sub-task` (the required pre-Implementation sub-task) |
-| `SubtaskAssigneeName` | `lsyh.secops@lhsystems.com` (Jira login the approval sub-task is assigned to) |
+| `SubtaskAssigneeName` | `secops` (Jira **login** the approval sub-task is assigned to — not the email/display name) |
 | `StatusPlanningName` | `Planning` |
 | `StatusImplementationName` | `Implementation` |
 | `StatusPostImplReviewName` | `Post implementation review` |

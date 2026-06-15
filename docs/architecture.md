@@ -29,9 +29,7 @@ Sentinel incident trigger
   ├─► Find_Clone_Key (Until)       (poll GET /search jql=reporter+created>=-10m → Set_Clone_Key at loop top-level; exit on key presence)
   ├─► Verify_Clone_Found           (Clone_Key empty → Terminate CloneNotFound)
   ├─► Override_Clone_Fields        (PUT issue/{Clone_Key}: description + planned start/end)
-  ├─► Find_Assignee_Account        (GET user/assignable/search?username=: resolve {SubtaskAssigneeName} → login)
-  ├─► Assert_Assignee_Found        (fail fast if the filtered search matched no user)
-  ├─► Create_Approval_Subtask      (POST /issue: sub-task on clone — required by Start-implementation validator)
+  ├─► Create_Approval_Subtask      (POST /issue: sub-task on clone, assignee={SubtaskAssigneeName} login — required by Start-implementation validator)
   ├─► Walk_to_Planning            (re-probe transitions → POST → poll until landed)
   ├─► Walk_to_Implementation      (re-probe transitions → POST → poll until landed)
   │
