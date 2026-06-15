@@ -31,7 +31,8 @@ https://int-trackspace.lhsystems.com/browse/OPSLSY-<n>
 ```
 (INT environment — the current `JIRAHOST`; use `https://trackspace.lhsystems.com` for production.)
 
-The attachment `sentinel_blocked_ips_<incident-number>.csv` lists the IPs that were
+The attachment `RESULT_Check_MS_threat_Intelligence_IPs_against_AbuseIPDB-YYYYMMDD.csv` (date
+in the Budapest zone, no separators) lists the IPs that were
 pushed to the blocklist (enriched rows on the normal path, plain IPs on the AbuseIPDB
 fallback path).
 

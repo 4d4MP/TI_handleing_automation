@@ -20,7 +20,7 @@ Sentinel incident trigger
   │
   ├─► Entities - Get IPs          (Sentinel connector)
   ├─► Get_Jira_password           (Key Vault, secureData)
-  ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart, plannedEnd=+5m, dateStamp, summary)
+  ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart/End, dateStamp, fileStamp, displayStart/Finish in CET, summary)
   ├─► Initialize Excluded_IPs / Block_IPs / CSV_Rows / Clone_Key  (root-level variables)
   │
   ├─► Resolve_Template_Id          (GET issue/OPSLSY-75376?fields=id) → Parse_Template_Id

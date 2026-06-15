@@ -93,24 +93,29 @@ derives the rest so start/end are consistent. Timestamps are built with `concat`
 | Value | Expression | Example |
 |---|---|---|
 | `dateStamp` | `formatDateTime(start,'yyyy.MM.dd')` (for the summary) | `2026.06.12` |
+| `fileStamp` | `convertTimeZone(start,'UTC','Central European Standard Time','yyyyMMdd')` (for the attachment name) | `20260612` |
 | `plannedStart` | `concat(... addMinutes(start,20) ...)` → full ISO, **start +20 min** | `2026-06-12T09:50:00.000+0000` |
 | `plannedEnd` | same over `addMinutes(start,25)` → full ISO, **finish +25 min** | `2026-06-12T09:55:00.000+0000` |
-| `displayStart` | `formatDateTime(addMinutes(start,20),'yyyy-MM-dd HH:mm')` | `2026-06-12 09:50` |
-| `displayFinish` | `formatDateTime(addMinutes(start,25),'yyyy-MM-dd HH:mm')` | `2026-06-12 09:55` |
+| `displayStart` | `convertTimeZone(addMinutes(start,20),'UTC','Central European Standard Time','yyyy-MM-dd HH:mm')` | `2026-06-12 11:50` |
+| `displayFinish` | `convertTimeZone(addMinutes(start,25),'UTC','Central European Standard Time','yyyy-MM-dd HH:mm')` | `2026-06-12 11:55` |
 | `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` | |
 
 The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
 
-> **All six time fields share one source — run start + 20 min (start) / + 25 min (finish).**
-> `Compute_Run_Times` produces the start time in two formats: full ISO (`plannedStart`/
-> `plannedEnd`, for the Jira datetime fields) and `yyyy-MM-dd HH:mm` (`displayStart`/
-> `displayFinish`, for the description). Those exact values populate **all six** date
-> fields identically: description *Accurate start/finish*, Planned start/end
+> **All time fields share one source — run start + 20 min (start) / + 25 min (finish).**
+> `Compute_Run_Times` produces the start time in two forms: full ISO `+0000`
+> (`plannedStart`/`plannedEnd`, for the Jira datetime fields) and a human-readable string
+> (`displayStart`/`displayFinish`, for the description). The Jira datetime fields are stored
+> as the UTC instant but **rendered in the instance's local zone** (Budapest, CET/CEST), so
+> the description strings are also converted to `Central European Standard Time` via
+> `convertTimeZone` (auto-DST: +2 in summer, +1 in winter). That way the description
+> *Accurate start/finish* read **the same wall-clock time** Jira shows for Planned start/end
 > (`customfield_22500`/`22501`, set on the Override PUT **and** re-affirmed on the
-> Implementation transition), and Actual start/finish (`customfield_23600`/`23601`, on the
-> PIR transition). The **+20 min** offset is the safety margin: the *Start implementation*
-> validator rejects a past Planned start, and +20 from run start stays comfortably in the
-> future by the time the walk reaches that hop (which is only a few minutes in). No
+> Implementation transition) and Actual start/finish (`customfield_23600`/`23601`, on the
+> PIR transition) — earlier they disagreed by the +2 h UTC↔CEST offset. The **+20 min**
+> offset is the safety margin: the *Start implementation* validator rejects a past Planned
+> start, and +20 from run start stays comfortably in the future by the time the walk reaches
+> that hop (which is only a few minutes in). No
 > per-hop recomputation and no `Planned_*` variables — one base instant, used everywhere,
 > so planned, actual, and the human-readable description never disagree.
 
@@ -210,7 +215,7 @@ issue **has at least one sub-task** (`"Transition is allowed only if the issue h
 | `project.key` | `{JiraProjectKey}` |
 | `parent.key` | `{Clone_Key}` |
 | `issuetype.name` | `{SubtaskIssueTypeName}` (default `Approval sub-task`) |
-| `summary` | `Manual review of the blocked IPs` |
+| `summary` | `Manual review of the automation workflow` |
 | `assignee.name` | `{SubtaskAssigneeName}` — the Jira **login**, default `secops` |
 | `description` | `This is the manual review to decide whether the automation was successful.` |
 

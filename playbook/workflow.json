@@ -76,8 +76,9 @@
                     "plannedStart": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 20), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 20), 'HH:mm:ss'), '.000+0000')}",
                     "plannedEnd": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 25), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 25), 'HH:mm:ss'), '.000+0000')}",
                     "dateStamp": "@{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}",
-                    "displayStart": "@{formatDateTime(addMinutes(outputs('Capture_Run_Start'), 20), 'yyyy-MM-dd HH:mm')}",
-                    "displayFinish": "@{formatDateTime(addMinutes(outputs('Capture_Run_Start'), 25), 'yyyy-MM-dd HH:mm')}",
+                    "fileStamp": "@{convertTimeZone(outputs('Capture_Run_Start'), 'UTC', 'Central European Standard Time', 'yyyyMMdd')}",
+                    "displayStart": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 20), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
+                    "displayFinish": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 25), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
                     "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
                 },
                 "runAfter": {
@@ -1758,7 +1759,7 @@
                         "$multipart": [
                             {
                                 "headers": {
-                                    "Content-Disposition": "form-data; name=\"file\"; filename=\"sentinel_blocked_ips_@{triggerBody()?['object']?['properties']?['incidentNumber']}.csv\"",
+                                    "Content-Disposition": "form-data; name=\"file\"; filename=\"RESULT_Check_MS_threat_Intelligence_IPs_against_AbuseIPDB-@{outputs('Compute_Run_Times')['fileStamp']}.csv\"",
                                     "Content-Type": "text/csv"
                                 },
                                 "body": "@body('Build_CSV')"
@@ -2762,7 +2763,7 @@
                             "issuetype": {
                                 "name": "@{parameters('SubtaskIssueTypeName')}"
                             },
-                            "summary": "Manual review of the blocked IPs",
+                            "summary": "Manual review of the automation workflow",
                             "assignee": {
                                 "name": "@{parameters('SubtaskAssigneeName')}"
                             },
