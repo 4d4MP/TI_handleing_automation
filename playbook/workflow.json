@@ -367,26 +367,11 @@
                             ]
                         }
                     },
-                    "Set_Clone_Key_If_Found": {
-                        "type": "If",
-                        "expression": {
-                            "greater": [
-                                "@length(coalesce(body('Parse_Search')?['issues'], json('[]')))",
-                                0
-                            ]
-                        },
-                        "actions": {
-                            "Set_Clone_Key": {
-                                "type": "SetVariable",
-                                "inputs": {
-                                    "name": "Clone_Key",
-                                    "value": "@{first(body('Parse_Search')?['issues'])?['key']}"
-                                },
-                                "runAfter": {}
-                            }
-                        },
-                        "else": {
-                            "actions": {}
+                    "Set_Clone_Key": {
+                        "type": "SetVariable",
+                        "inputs": {
+                            "name": "Clone_Key",
+                            "value": "@{coalesce(first(body('Parse_Search')?['issues'])?['key'], '')}"
                         },
                         "runAfter": {
                             "Parse_Search": [

@@ -26,7 +26,7 @@ Sentinel incident trigger
   ├─► Resolve_Template_Id          (GET issue/OPSLSY-75376?fields=id) → Parse_Template_Id
   ├─► Clone_OPSLSY_Change          (POST /secure/CloneIssueDetails.jspa, Basic + X-Atlassian-Token:no-check)
   ├─► Check_Clone_Status           (runAfter Succeeded|Failed; 302/2xx → continue, else Terminate)
-  ├─► Find_Clone_Key (Until)       (poll GET /search jql=reporter+created>=-10m → set Clone_Key; exit on key presence)
+  ├─► Find_Clone_Key (Until)       (poll GET /search jql=reporter+created>=-10m → Set_Clone_Key at loop top-level; exit on key presence)
   ├─► Verify_Clone_Found           (Clone_Key empty → Terminate CloneNotFound)
   ├─► Override_Clone_Fields        (PUT issue/{Clone_Key}: description + planned start/end)
   ├─► Find_Assignee_Account        (GET user/assignable/search?username=: resolve {SubtaskAssigneeName} → login)

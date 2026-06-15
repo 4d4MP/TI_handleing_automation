@@ -139,9 +139,14 @@ The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
    `maxResults=1`, `fields=key,created,summary`. The reporter is the `sentinelsvc` service
    account and one run creates exactly one clone, so this is reliable — unlike a
    `summary ~ "<marker>"` text match, which Jira tokenises unreliably and which suffers
-   index lag. `Set_Clone_Key_If_Found` captures `issues[0].key` into `Clone_Key` **only when
-   the search returned an issue** (`issues` non-empty); an empty poll leaves the variable
-   empty and the loop continues. The `Until` exit condition is pure key-presence —
+   index lag. `Set_Clone_Key` runs at the **top level of the loop body** (after `Parse_Search`)
+   and assigns `Clone_Key = coalesce(issues[0].key, '')` **every iteration** — the found key,
+   or `''` when the poll was empty. This is deliberate: an earlier version nested the
+   assignment inside an `If` (`Set_Clone_Key_If_Found`), and Logic Apps does **not** reliably
+   surface a variable mutated inside a nested scope to the enclosing `Until` exit-condition
+   evaluation, so the loop kept spinning to its hard limit (~11 min) even though the
+   SetVariable had run with the correct value. Setting it at the loop's own scope makes the
+   exit condition see it. The `Until` exit condition is pure key-presence —
    `@not(empty(variables('Clone_Key')))` — and the loop delays 10 s, caps at **18 attempts /
    PT4M**, then `Verify_Clone_Found` terminates the run with `CloneNotFound` if `Clone_Key`
    is still empty. All downstream steps reference `variables('Clone_Key')` (unchanged name).
