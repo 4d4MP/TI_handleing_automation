@@ -2831,7 +2831,7 @@
                 "type": "String"
             },
             "SubtaskAssigneeName": {
-                "defaultValue": "",
+                "defaultValue": "lsyh.secops@lhsystems.com",
                 "type": "String"
             },
             "StatusPlanningName": {

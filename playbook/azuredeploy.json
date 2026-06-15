@@ -78,7 +78,7 @@
         },
         "SubtaskAssigneeName": {
             "type": "string",
-            "defaultValue": "",
+            "defaultValue": "lsyh.secops@lhsystems.com",
             "metadata": {
                 "description": "Jira login (username, not display name) assigned to the approval sub-task. Required by the sub-task create screen."
             }

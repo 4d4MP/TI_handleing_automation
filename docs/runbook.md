@@ -122,4 +122,4 @@ Parameters`) without redeploying ARM:
 | `StatusPlanningName` / `StatusImplementationName` / `StatusPostImplReviewName` / `JiraClosedStatusName` | `Planning` / `Implementation` / `Post implementation review` / `Closed` | Walk target status names, matched case-insensitively as a substring of a transition's target status. |
 | `TemplateIssueKey` | `OPSLSY-75376` | The Technical change cloned each run. Carries the Insight/Assets Affected item and all other change fields. |
 | `SubtaskIssueTypeName` | `Approval sub-task` | Issue type of the sub-task created on the clone before the Implementation transition (the *Start implementation* validator requires a sub-task). |
-| `SubtaskAssigneeName` | *(empty)* | **Must be set** to a Jira login (not the display name). The sub-task create screen requires an assignee; an empty/invalid value fails `Create_Approval_Subtask` and stops the run. |
+| `SubtaskAssigneeName` | `lsyh.secops@lhsystems.com` | Jira login (not the display name) the sub-task is assigned to. The create screen requires an assignee; an empty/invalid value fails `Create_Approval_Subtask` and stops the run. |

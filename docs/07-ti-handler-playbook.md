@@ -299,7 +299,7 @@ Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
 | `JiraProjectKey` | `OPSLSY` (used in the find-clone-by-search JQL) |
 | `TemplateIssueKey` | `OPSLSY-75376` (the change cloned each run) |
 | `SubtaskIssueTypeName` | `Approval sub-task` (the required pre-Implementation sub-task) |
-| `SubtaskAssigneeName` | *(empty — set to a Jira login)* assignee for the approval sub-task |
+| `SubtaskAssigneeName` | `lsyh.secops@lhsystems.com` (Jira login the approval sub-task is assigned to) |
 | `StatusPlanningName` | `Planning` |
 | `StatusImplementationName` | `Implementation` |
 | `StatusPostImplReviewName` | `Post implementation review` |
