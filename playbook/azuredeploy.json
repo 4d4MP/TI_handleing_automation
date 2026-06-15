@@ -3065,10 +3065,37 @@
                                         },
                                         "summary": "Manual review of the blocked IPs",
                                         "assignee": {
-                                            "name": "@{parameters('SubtaskAssigneeName')}"
+                                            "name": "@{first(body('Find_Assignee_Account'))?['name']}"
                                         },
                                         "description": "This is the manual review to decide whether the automation was successful."
                                     }
+                                },
+                                "authentication": {
+                                    "type": "Basic",
+                                    "username": "@parameters('JIRAUserName')",
+                                    "password": "@body('Get_Jira_password')?['value']"
+                                }
+                            },
+                            "runAfter": {
+                                "Find_Assignee_Account": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "runtimeConfiguration": {
+                                "secureData": {
+                                    "properties": [
+                                        "inputs"
+                                    ]
+                                }
+                            }
+                        },
+                        "Find_Assignee_Account": {
+                            "type": "Http",
+                            "inputs": {
+                                "uri": "@{parameters('JIRAHOST')}/rest/api/2/user/assignable/search?issueKey=@{variables('Clone_Key')}&query=@{encodeUriComponent(parameters('SubtaskAssigneeName'))}&maxResults=1",
+                                "method": "GET",
+                                "headers": {
+                                    "Cookie": "@{variables('Affinity_Cookie')}"
                                 },
                                 "authentication": {
                                     "type": "Basic",

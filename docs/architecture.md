@@ -29,6 +29,7 @@ Sentinel incident trigger
   ├─► Find_Clone_Key (Until)       (poll GET /search jql=reporter+created>=-10m → set Clone_Key; exit on key presence)
   ├─► Verify_Clone_Found           (Clone_Key empty → Terminate CloneNotFound)
   ├─► Override_Clone_Fields        (PUT issue/{Clone_Key}: description + planned start/end)
+  ├─► Find_Assignee_Account        (GET user/assignable/search: resolve {SubtaskAssigneeName} → login)
   ├─► Create_Approval_Subtask      (POST /issue: sub-task on clone — required by Start-implementation validator)
   ├─► Walk_to_Planning            (re-probe transitions → POST → poll until landed)
   ├─► Walk_to_Implementation      (re-probe transitions → POST → poll until landed)

@@ -196,8 +196,17 @@ Blocked IPs can be found in the attachment.
 
 The *Start implementation* transition has a validator that rejects the move unless the
 issue **has at least one sub-task** (`"Transition is allowed only if the issue has sub-task"`).
-`Create_Approval_Subtask` (`POST /rest/api/2/issue`, runs after `Override_Clone_Fields`,
-before `Walk_to_Planning`) creates one on the clone:
+Two actions run after `Override_Clone_Fields` and before `Walk_to_Planning`:
+
+`Find_Assignee_Account` (`GET /rest/api/2/user/assignable/search?issueKey={Clone_Key}&query={SubtaskAssigneeName}`)
+resolves the **real Jira login** for the assignee. Jira REST sets `assignee` by `name` (the
+login), **not** by display name or email — passing the email directly fails with
+`User '…' does not exist`. The search matches the query against username/display/email and
+returns the user object, and the create reads `first(body('Find_Assignee_Account'))?['name']`.
+So `SubtaskAssigneeName` can stay a human-friendly value (e.g. an email) and the login is
+looked up at runtime.
+
+`Create_Approval_Subtask` (`POST /rest/api/2/issue`) then creates the sub-task on the clone:
 
 | field | value |
 | --- | --- |
@@ -205,14 +214,14 @@ before `Walk_to_Planning`) creates one on the clone:
 | `parent.key` | `{Clone_Key}` |
 | `issuetype.name` | `{SubtaskIssueTypeName}` (default `Approval sub-task`) |
 | `summary` | `Manual review of the blocked IPs` |
-| `assignee.name` | `{SubtaskAssigneeName}` — Jira **login**, not display name |
+| `assignee.name` | `first(body('Find_Assignee_Account'))?['name']` (resolved login) |
 | `description` | `This is the manual review to decide whether the automation was successful.` |
 
-The create screen marks Assignee required, so `SubtaskAssigneeName` must be a real login
-(the display name `LSYH, BUD SECOPS` is **not** accepted by REST). If the create fails
-(bad login, missing sub-task type), `Walk_to_Planning` won't run and the whole run fails
-with the create error — by design, so the problem surfaces immediately. Reporter defaults
-to `sentinelsvc`; security level is inherited from the parent.
+If the lookup returns no user (`SubtaskAssigneeName` matches nobody, or the service account
+lacks *Browse users*), `assignee.name` resolves empty and `Create_Approval_Subtask` fails with
+the assignee error; if the create fails for any reason, `Walk_to_Planning` won't run and the
+whole run fails — by design, so the problem surfaces immediately. Reporter defaults to
+`sentinelsvc`; security level is inherited from the parent.
 
 ---
 
