@@ -5,9 +5,13 @@
 **Trigger:** Microsoft Sentinel incident creation.
 
 The playbook is **fully autonomous** — there is no human approval step. On every
-incident it raises one OPSLSY *Technical change*, drives it to **Implementation**,
-enriches the incident IPs, writes the Palo Alto blocklist blob, attaches the CSV,
-then walks the change to **Closed** with resolution **Successful**.
+incident it raises one OPSLSY *Technical change* and drives it to **Planning**, then
+health-checks AbuseIPDB. If AbuseIPDB is healthy it walks the change to **Implementation**,
+enriches the incident IPs, writes the Palo Alto blocklist blob, attaches the CSV, then
+walks the change to **Closed** with resolution **Successful**. If AbuseIPDB is **down** it
+blocks nothing: it attaches a CSV of all incident IPs, comments that manual intervention is
+required, assigns the change to SecOps, and leaves it in **Planning** (see *AbuseIPDB
+outage* below).
 
 > **History:** this playbook previously opened a **CLOPSSEC** approval Task, waited
 > up to 48 h for an analyst to move it to an approval status, and only then wrote
@@ -18,23 +22,28 @@ then walks the change to **Closed** with resolution **Successful**.
 
 ---
 
-## Order of operations (implementation-first)
+## Order of operations (health-check gates Implementation)
 
 ```
 trigger
   → clone OPSLSY-75376          (CloneIssueDetails.jspa servlet) + find new key by search
   → override fields             (PUT description + planned start/end; summary set at clone)
-  → walk to Implementation      (Open → Planning → Implementation, at run start)
-  → enrich + build CSV          (AbuseIPDB filter/dedupe → kept-IP rows)
-  → write blocklist blob        (ungated — the actual change being implemented)
-  → attach CSV                  (POST /issue/{key}/attachments)
-  → walk to Closed              (Post implementation review → Closed, resolution Successful)
+  → walk to Planning            (Open → Planning)
+  → AbuseIPDB health check
+       ├─ healthy → walk to Implementation   (Planning → Implementation)
+       │            → enrich + build CSV      (AbuseIPDB filter/dedupe → kept-IP rows)
+       │            → write blocklist blob    (ungated — the actual change being implemented)
+       │            → attach CSV              (POST /issue/{key}/attachments)
+       │            → walk to Closed          (Post implementation review → Closed, resolution Successful)
+       └─ down → attach CSV of ALL IPs + comment + assign SecOps, LEFT in Planning
+                 → Terminate (runStatus Succeeded)
 ```
 
-The change sits in **Implementation** for the duration of the real work (enrichment +
-blocklist write), matching change-management semantics, then closes when the work is
-done. The clone is created and advanced to Implementation **before any AbuseIPDB
-work** so the ticket is never stranded if enrichment fails.
+On the healthy path the change sits in **Implementation** for the duration of the real
+work (enrichment + blocklist write), matching change-management semantics, then closes when
+the work is done. The change is advanced to Implementation **only after** the AbuseIPDB
+health check succeeds — so an AbuseIPDB outage leaves it safely in Planning for SecOps
+instead of stranding it in Implementation or auto-blocking un-enriched IPs.
 
 All Trackspace calls use **Basic auth** — service account `sentinelsvc` with the
 Key Vault secret `sentinelsvc` (read via the `keyvault-TI-handler` connection,
@@ -276,21 +285,27 @@ The close poll stops when the status name contains `Closed` **or** its
 
 ---
 
-## The implementation work (ticket in Implementation)
+## The implementation work (healthy path: ticket in Implementation)
 
-Unchanged from the previous flow except that it is now **ungated** and wrapped so an
-AbuseIPDB outage falls back instead of aborting:
+The blocklist write is **ungated**. The AbuseIPDB health check forks the run: a healthy
+check proceeds to Implementation + blocking, an outage diverts to manual intervention and
+blocks nothing:
 
-- **Healthy AbuseIPDB** (`AbuseIPDB_health_check` against `8.8.8.8` succeeds) →
-  `Enrichment_Scope`: per-IP `/check` (50-way Foreach), keep rows with
+- **Healthy AbuseIPDB** (`AbuseIPDB_health_check` against `8.8.8.8` succeeds) → walk to
+  Implementation, then `Enrichment_Scope`: per-IP `/check` (50-way Foreach), keep rows with
   `totalReports >= MinReports` whose ISP is not in `ExcludedISPs` (lower-case
   substring match), then set `Block_IPs` = kept IP list and `CSV_Rows` = the rich kept
   rows.
 - **AbuseIPDB down** (`AbuseIPDB_health_check` Failed/TimedOut/Skipped) →
-  `Fallback_Build_Raw_IPs`: **no separate ticket** — the change already exists and is in
-  Implementation. Set `Block_IPs` and `CSV_Rows` from the **raw, un-enriched** incident
-  IP list (`Entities - Get IPs`). The change is still attached-to and closed, so it is
-  never stranded in Implementation.
+  `Fallback_Manual_Intervention`: the change is **never advanced to Implementation** and
+  **nothing is blocked** — the raw, un-enriched IPs bypass the threshold/ISP filtering and
+  could include addresses that must not be blocked. The scope attaches a CSV of **all**
+  incident IPs (`Select_Fallback_Rows` → `Build_Fallback_CSV` → `Attach_Fallback_CSV`),
+  posts a "manual intervention required" comment (`Comment_Manual_Intervention`), assigns
+  the change to SecOps (`Assign_To_SecOps`, `PUT /assignee` = `SubtaskAssigneeName`), and
+  leaves it in **Planning**. `Terminate_Manual_Intervention` ends the run `Succeeded`.
+  `Write_Blocklist_Blob`, `Build_CSV`, and the Implementation/PIR/Closed walks are Skipped
+  on this path.
 - **Blocklist blob write is ungated** (`Write_Blocklist_Blob`): GET
   `$web/index.html`, line-level dedupe `Block_IPs` against existing content, and if
   anything is new, PUT the appended blob (managed identity, `text/html`). This is the

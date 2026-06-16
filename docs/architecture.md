@@ -5,11 +5,12 @@
 When a Microsoft Sentinel incident is created, this playbook **autonomously**:
 
 1. Pulls IP entities from the incident.
-2. Raises an OPSLSY *Technical change* (a logical clone of the template `OPSLSY-75376`) and walks it to **Implementation** — at run start, before any enrichment.
-3. Enriches each IP against AbuseIPDB and filters out IPs below the report threshold or owned by an ignored ISP (on an AbuseIPDB outage, falls back to the raw incident IPs).
-4. Appends the surviving IPs (one per line, deduped) to a static-site blocklist blob — **ungated**; there is no approval.
-5. Attaches the CSV report to the change.
-6. Walks the change to **Closed** with resolution **Successful**.
+2. Raises an OPSLSY *Technical change* (a logical clone of the template `OPSLSY-75376`) and walks it to **Planning**.
+3. Health-checks AbuseIPDB. **If it is down, nothing is blocked**: a CSV of all incident IPs is attached, a "manual intervention required" comment is posted, the change is assigned to SecOps and **left in Planning**, and the run ends Succeeded. Otherwise the change is walked to **Implementation** and enrichment proceeds.
+4. Enriches each IP against AbuseIPDB and filters out IPs below the report threshold or owned by an ignored ISP.
+5. Appends the surviving IPs (one per line, deduped) to a static-site blocklist blob — **ungated**; there is no approval.
+6. Attaches the CSV report to the change.
+7. Walks the change to **Closed** with resolution **Successful**.
 
 The whole flow runs in a single Azure Logic App (Consumption). There is no Python — the filter loop lives entirely in the workflow. There is **no human approval** and **no CLOPSSEC ticket** (both removed); no comments are written back to the Sentinel incident.
 
@@ -31,18 +32,23 @@ Sentinel incident trigger
   ├─► Override_Clone_Fields        (PUT issue/{Clone_Key}: description + planned start/end)
   ├─► Create_Approval_Subtask      (POST /issue: sub-task on clone, assignee={SubtaskAssigneeName} login — required by Start-implementation validator)
   ├─► Walk_to_Planning            (re-probe transitions → POST → poll until landed)
-  ├─► Walk_to_Implementation      (re-probe transitions → POST → poll until landed)
   │
   ├─► AbuseIPDB_health_check (AbuseIPDBAPI GET /check?ipAddress=8.8.8.8)
-  │       ├─(Succeeded)─► Enrichment_Scope
-  │       │                 ├─ Foreach IP (50-way): GET /check → Compose_Row / Handle_Failed_Check
-  │       │                 ├─ Build_Report_Rows → Filter_Min_Reports → Collect_Excluded_IPs → Filter_Kept_Rows
-  │       │                 ├─ Build_Kept_IPs
-  │       │                 └─ Set Block_IPs = kept IPs ; CSV_Rows = kept rows
-  │       └─(Failed/TimedOut/Skipped)─► Fallback_Build_Raw_IPs
-  │                                       └─ Set Block_IPs = raw IPs ; CSV_Rows = raw rows
+  │       ├─(Succeeded)─► Walk_to_Implementation  (re-probe transitions → POST → poll until landed)
+  │       │                 └─► Enrichment_Scope
+  │       │                       ├─ Foreach IP (50-way): GET /check → Compose_Row / Handle_Failed_Check
+  │       │                       ├─ Build_Report_Rows → Filter_Min_Reports → Collect_Excluded_IPs → Filter_Kept_Rows
+  │       │                       ├─ Build_Kept_IPs
+  │       │                       └─ Set Block_IPs = kept IPs ; CSV_Rows = kept rows
+  │       └─(Failed/TimedOut/Skipped)─► Fallback_Manual_Intervention   (ticket LEFT in Planning, nothing blocked)
+  │                                       ├─ Select_Fallback_Rows (all incident IPs → {ip})
+  │                                       ├─ Build_Fallback_CSV (Table/CSV)
+  │                                       ├─ Attach_Fallback_CSV (POST /attachments)
+  │                                       ├─ Comment_Manual_Intervention (POST /comment)
+  │                                       └─ Assign_To_SecOps (PUT /assignee = {SubtaskAssigneeName})
+  │                                     → Terminate_Manual_Intervention (runStatus Succeeded)
   │
-  ├─► Build_CSV                    (Table/CSV from CSV_Rows ; runs after whichever branch ran)
+  ├─► Build_CSV                    (Table/CSV from CSV_Rows ; runs only after Enrichment_Scope)
   ├─► Write_Blocklist_Blob         (ungated: GET blob → dedupe Block_IPs → PUT if anything new)
   ├─► Attach_CSV_to_Jira           (POST /issue/{key}/attachments, multipart)
   ├─► Walk_to_Post_Implementation_Review  (POST resolution=Successful + actual start/finish, poll)
@@ -103,9 +109,9 @@ no entry e in ExcludedISPs satisfies  toLower(e) is a substring of toLower(isp)
 
 Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` (lower-case **substring** match — AbuseIPDB appends legal suffixes like `"Palo Alto Networks, Inc"`, so an exact match would miss them). `Filter_Min_Reports` keeps the threshold survivors, `Collect_Excluded_IPs` loops the static `ExcludedISPs` list one sequential iteration at a time (`concurrency.repetitions = 1`, so the append is race-free) collecting matched IPs into `Excluded_IPs`, and `Filter_Kept_Rows` drops any survivor in `Excluded_IPs`. The CSV (`CSV_Rows`) and blocklist set (`Block_IPs`) are both built from the kept rows, so attachment and blocklist agree. IPs whose `/check` call fails are skipped by `Handle_Failed_Check`.
 
-### AbuseIPDB outage → raw fallback
+### AbuseIPDB outage → manual-intervention fallback
 
-`AbuseIPDB_health_check` no longer terminates the run. If it fails, `Fallback_Build_Raw_IPs` runs instead of `Enrichment_Scope` and sets `Block_IPs` / `CSV_Rows` from the **raw** `Entities - Get IPs` list. There is no separate ticket and no early termination: the change created at run start is always attached-to and walked to Closed, so it is never stranded in Implementation. `Build_CSV` runs after whichever branch executed (`runAfter` accepts `Succeeded` or `Skipped` from both scopes).
+`AbuseIPDB_health_check` runs right after `Walk_to_Planning`, **before** the change is advanced to Implementation. If it fails (`Failed`/`TimedOut`/`Skipped`), `Fallback_Manual_Intervention` runs instead of the Implementation walk + `Enrichment_Scope`. **Nothing is blocked** — the raw, un-enriched incident IPs are deliberately *not* pushed to the blocklist, because they bypass the report-threshold and ISP-exclusion filtering and could include IPs that must never be blocked. Instead the scope: builds a CSV of all incident IPs (`Select_Fallback_Rows` → `Build_Fallback_CSV`), attaches it (`Attach_Fallback_CSV`), posts a "manual intervention required" comment (`Comment_Manual_Intervention`), assigns the change to SecOps (`Assign_To_SecOps`, `PUT /assignee` = `SubtaskAssigneeName`), and **leaves the change in Planning** (no transition). `Terminate_Manual_Intervention` then ends the run with `runStatus: Succeeded` (handled outcome, no failure alert). Because Implementation/`Enrichment_Scope`/`Build_CSV`/`Write_Blocklist_Blob` all chain off the healthy branch, they are Skipped on this path — so is the Terminate on the healthy path.
 
 ## Blocklist update semantics (ungated)
 
@@ -114,7 +120,7 @@ Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", 
 3. If new IPs remain, build `<existing><\n if needed><newline-joined new>\n` and `PUT` it back as a `BlockBlob` with `x-ms-blob-content-type: text/html`.
 4. If nothing new, skip the PUT.
 
-The write happens on every run regardless of IP count and with no approval gate — it is the actual change being implemented while the ticket sits in Implementation.
+The write happens on every healthy-path run regardless of IP count and with no approval gate — it is the actual change being implemented while the ticket sits in Implementation. It does **not** run on the AbuseIPDB-outage fallback path.
 
 ### Known race window — concurrent runs
 
@@ -123,13 +129,13 @@ The PUT is unconditional (no `If-Match` / blob lease). Two runs reaching the blo
 ## Decisions and trade-offs
 
 - **Fully autonomous, change-managed.** The approval gate and CLOPSSEC ticket were removed by management decision. The ticket of record is an OPSLSY Technical change that sits in **Implementation** while the work runs and closes when done — matching change-management semantics rather than an approval handshake.
-- **Implementation-first ordering.** The change is created and advanced to Implementation *before* AbuseIPDB work so it is never stranded if enrichment fails; the close walk runs after the blob write + attachment.
+- **Health-check gates Implementation.** The change is advanced to Implementation *only after* `AbuseIPDB_health_check` succeeds. If AbuseIPDB is down the change is deliberately left in **Planning** and handed to SecOps (CSV + comment + assignee) rather than auto-blocking un-enriched IPs. On the healthy path the close walk runs after the blob write + attachment.
 - **Name-driven walk, not hardcoded ids.** Survives test↔prod transition-id drift; the skip-list avoids revoke/withdraw/reject/cancel edges.
 - **Poll-until-landed after each transition.** Trackspace transitions can drop the connection while still committing; trusting the POST response would misreport state.
 - **Gateway session-affinity cookie.** INT Trackspace is behind an Azure Application Gateway with cookie-based affinity that `307`-redirects the first cookieless request to plant `ApplicationGatewayAffinity`/`JSESSIONID`. A `Prime_Affinity_Cookie` GET (its `307` tolerated) captures that `Set-Cookie`; `Build_Cookie_Parts`/`Set_Affinity_Cookie` reduce it to a `name=value; …` string in the `Affinity_Cookie` variable; every Jira HTTP call then sends `Cookie: @variables('Affinity_Cookie')` so the gateway serves the pinned backend instead of looping on `307`. Empty/harmless where a gateway doesn't use affinity.
 - **No Function App.** Filtering is small and rare; keeping it in the Logic App removes a deploy target.
 - **Parallel enrichment (`concurrency.repetitions = 50`).** Each iteration only does its HTTP call + `Compose_Row`; `result()` is reshaped afterwards into report rows and the kept set. Ordering becomes completion order; nothing downstream depends on it.
-- **Resilient per-IP enrichment + outage fallback.** A failed `/check` is caught per iteration; a total AbuseIPDB outage routes to the raw-IP fallback instead of aborting.
+- **Resilient per-IP enrichment + safe outage fallback.** A failed `/check` is caught per iteration; a total AbuseIPDB outage routes to the manual-intervention fallback (CSV + comment + SecOps assignment, left in Planning, nothing blocked) instead of auto-blocking un-enriched IPs or aborting.
 - **Multipart attachment via HTTP action** (`X-Atlassian-Token: no-check`, `body.$multipart`).
 - **Blob via HTTP + managed identity** rather than the Azure Blob connector to avoid the `$web` double-encoding gotcha.
 - **Secrets flagged `secureData`** on `Get_Jira_password` and every Trackspace HTTP call carrying the Basic auth header. AbuseIPDB has no `secureData` flag because the key never enters the workflow.

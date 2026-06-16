@@ -8,13 +8,23 @@ rolling back a block.
 ## What happens on a run
 
 1. An OPSLSY *Technical change* (clone of `OPSLSY-75376`) is created and walked to
-   **Implementation** at run start.
-2. The incident IPs are enriched against AbuseIPDB; those with `totalReports ≥
+   **Planning**.
+2. AbuseIPDB is health-checked. **If it is down, nothing is blocked** — see *AbuseIPDB
+   down* below. Otherwise the change is walked to **Implementation** and the run continues.
+3. The incident IPs are enriched against AbuseIPDB; those with `totalReports ≥
    MinReports` and a non-excluded ISP are appended to
-   `lsyweuritcsprdmspalo001/$web/index.html` (line-level deduped). If AbuseIPDB is
-   down, the **raw** incident IPs are used instead.
-3. The CSV of blocked IPs is attached to the change.
-4. The change is walked to **Closed** with resolution **Successful**.
+   `lsyweuritcsprdmspalo001/$web/index.html` (line-level deduped).
+4. The CSV of blocked IPs is attached to the change.
+5. The change is walked to **Closed** with resolution **Successful**.
+
+### AbuseIPDB down (manual-intervention fallback)
+
+When the health check fails the run does **not** block anything (the raw, un-enriched IPs
+could include addresses that must never be blocked). Instead it attaches a CSV of **all**
+incident IPs, posts a comment that AbuseIPDB failed and manual intervention is required,
+assigns the change to **SecOps** (`SubtaskAssigneeName`), and **leaves it in Planning**. The
+blocklist blob is untouched and the Logic App run still ends **Succeeded**. A SecOps engineer
+must review the attached IPs and apply/close the change by hand.
 
 **No comments are posted to the Sentinel incident.** To see what a run did, open the
 OPSLSY change (description, attachment, history) and/or inspect the blocklist blob.
@@ -33,8 +43,8 @@ https://int-trackspace.lhsystems.com/browse/OPSLSY-<n>
 
 The attachment `RESULT_Check_MS_threat_Intelligence_IPs_against_AbuseIPDB-YYYYMMDD.csv` (date
 in the Budapest zone, no separators) lists the IPs that were
-pushed to the blocklist (enriched rows on the normal path, plain IPs on the AbuseIPDB
-fallback path).
+pushed to the blocklist (enriched rows). On the AbuseIPDB-down fallback the same-named
+attachment instead lists **all** incident IPs for manual review, and nothing was blocked.
 
 ## Verifying the blocklist
 
@@ -100,7 +110,7 @@ re-runs idempotent. To avoid it entirely, switch `Update_blob` to use the `ETag`
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `AbuseIPDB_health_check` Failed/TimedOut | AbuseIPDB down or OMS connection auth expired | The run **does not abort** — it falls back to the raw incident IPs and still blocks + closes the change. If the connection auth expired, contact OMS to re-authorise the `abuseipdbapi` connector in `LSY_WEUR_ITCS_PRD_OMS_RG_001`. |
+| `AbuseIPDB_health_check` Failed/TimedOut | AbuseIPDB down or OMS connection auth expired | The run **does not abort and blocks nothing** — it attaches a CSV of all incident IPs, comments "manual intervention required", assigns the change to SecOps, leaves it in **Planning**, and ends Succeeded. A SecOps engineer must review and apply/close by hand. If the connection auth expired, contact OMS to re-authorise the `abuseipdbapi` connector in `LSY_WEUR_ITCS_PRD_OMS_RG_001`. |
 | `Resolve_Template_Id` / `Clone_OPSLSY_Change` 401 | Trackspace password rotated | Update the `sentinelsvc` secret in KV. |
 | Jira calls return `307` (loop) | Gateway session-affinity cookie not applied | `Prime_Affinity_Cookie` failed to capture `Set-Cookie`, so `Affinity_Cookie` is empty. Check the primer's response headers; confirm the gateway still uses `ApplicationGatewayAffinity` cookies and the `Build_Cookie_Parts` split still matches their `Set-Cookie` shape. |
 | `Clone_OPSLSY_Change` fails / `Find_Clone_Key` times out (`CloneNotFound`) | Template key wrong, clone servlet path/auth changed, or the clone didn't index within PT4M | Confirm `TemplateIssueKey=OPSLSY-75376` resolves, that `/secure/CloneIssueDetails.jspa` accepts Basic + `X-Atlassian-Token: no-check`, and that the lookup JQL (`project=OPSLSY AND issuetype="Technical change" AND reporter=sentinelsvc AND created >= -10m`) returns the clone. The loop exits on key presence (`@not(empty(variables('Clone_Key')))`), so a real timeout means the search never returned the clone within PT4M. |

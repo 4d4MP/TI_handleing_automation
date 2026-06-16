@@ -1331,7 +1331,7 @@
                     }
                 },
                 "runAfter": {
-                    "Walk_to_Planning": [
+                    "AbuseIPDB_health_check": [
                         "Succeeded"
                     ]
                 }
@@ -1352,7 +1352,7 @@
                     }
                 },
                 "runAfter": {
-                    "Walk_to_Implementation": [
+                    "Walk_to_Planning": [
                         "Succeeded"
                     ]
                 }
@@ -1563,23 +1563,15 @@
                     }
                 },
                 "runAfter": {
-                    "AbuseIPDB_health_check": [
+                    "Walk_to_Implementation": [
                         "Succeeded"
                     ]
                 }
             },
-            "Fallback_Build_Raw_IPs": {
+            "Fallback_Manual_Intervention": {
                 "type": "Scope",
                 "actions": {
-                    "Select_Raw_IPs": {
-                        "type": "Select",
-                        "inputs": {
-                            "from": "@coalesce(body('Entities_-_Get_IPs')?['IPs'], json('[]'))",
-                            "select": "@item()?['Address']"
-                        },
-                        "runAfter": {}
-                    },
-                    "Select_Raw_Rows": {
+                    "Select_Fallback_Rows": {
                         "type": "Select",
                         "inputs": {
                             "from": "@coalesce(body('Entities_-_Get_IPs')?['IPs'], json('[]'))",
@@ -1587,34 +1579,120 @@
                                 "ip": "@item()?['Address']"
                             }
                         },
+                        "runAfter": {}
+                    },
+                    "Build_Fallback_CSV": {
+                        "type": "Table",
+                        "inputs": {
+                            "from": "@body('Select_Fallback_Rows')",
+                            "format": "CSV"
+                        },
                         "runAfter": {
-                            "Select_Raw_IPs": [
+                            "Select_Fallback_Rows": [
                                 "Succeeded"
                             ]
                         }
                     },
-                    "Set_Block_IPs_Raw": {
-                        "type": "SetVariable",
+                    "Attach_Fallback_CSV": {
+                        "type": "Http",
                         "inputs": {
-                            "name": "Block_IPs",
-                            "value": "@body('Select_Raw_IPs')"
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/attachments",
+                            "method": "POST",
+                            "headers": {
+                                "X-Atlassian-Token": "no-check",
+                                "Cookie": "@{variables('Affinity_Cookie')}"
+                            },
+                            "body": {
+                                "$content-type": "multipart/form-data",
+                                "$multipart": [
+                                    {
+                                        "headers": {
+                                            "Content-Disposition": "form-data; name=\"file\"; filename=\"RESULT_Check_MS_threat_Intelligence_IPs_against_AbuseIPDB-@{outputs('Compute_Run_Times')['fileStamp']}.csv\"",
+                                            "Content-Type": "text/csv"
+                                        },
+                                        "body": "@body('Build_Fallback_CSV')"
+                                    }
+                                ]
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
                         },
                         "runAfter": {
-                            "Select_Raw_Rows": [
+                            "Build_Fallback_CSV": [
                                 "Succeeded"
                             ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
                         }
                     },
-                    "Set_CSV_Rows_Raw": {
-                        "type": "SetVariable",
+                    "Comment_Manual_Intervention": {
+                        "type": "Http",
                         "inputs": {
-                            "name": "CSV_Rows",
-                            "value": "@body('Select_Raw_Rows')"
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/comment",
+                            "method": "POST",
+                            "headers": {
+                                "Content-Type": "application/json",
+                                "Cookie": "@{variables('Affinity_Cookie')}"
+                            },
+                            "body": {
+                                "body": "AbuseIPDB health check failed - IP enrichment could not be performed. The attached CSV lists all IPs from the incident. No IPs were added to the blocklist; this change requires manual intervention. Assigned to SecOps for review."
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
                         },
                         "runAfter": {
-                            "Set_Block_IPs_Raw": [
+                            "Attach_Fallback_CSV": [
                                 "Succeeded"
                             ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
+                        }
+                    },
+                    "Assign_To_SecOps": {
+                        "type": "Http",
+                        "inputs": {
+                            "uri": "@{parameters('JIRAHOST')}/rest/api/2/issue/@{variables('Clone_Key')}/assignee",
+                            "method": "PUT",
+                            "headers": {
+                                "Content-Type": "application/json",
+                                "Cookie": "@{variables('Affinity_Cookie')}"
+                            },
+                            "body": {
+                                "name": "@{parameters('SubtaskAssigneeName')}"
+                            },
+                            "authentication": {
+                                "type": "Basic",
+                                "username": "@parameters('JIRAUserName')",
+                                "password": "@body('Get_Jira_password')?['value']"
+                            }
+                        },
+                        "runAfter": {
+                            "Comment_Manual_Intervention": [
+                                "Succeeded"
+                            ]
+                        },
+                        "runtimeConfiguration": {
+                            "secureData": {
+                                "properties": [
+                                    "inputs"
+                                ]
+                            }
                         }
                     }
                 },
@@ -1626,6 +1704,17 @@
                     ]
                 }
             },
+            "Terminate_Manual_Intervention": {
+                "type": "Terminate",
+                "inputs": {
+                    "runStatus": "Succeeded"
+                },
+                "runAfter": {
+                    "Fallback_Manual_Intervention": [
+                        "Succeeded"
+                    ]
+                }
+            },
             "Build_CSV": {
                 "type": "Table",
                 "inputs": {
@@ -1634,12 +1723,7 @@
                 },
                 "runAfter": {
                     "Enrichment_Scope": [
-                        "Succeeded",
-                        "Skipped"
-                    ],
-                    "Fallback_Build_Raw_IPs": [
-                        "Succeeded",
-                        "Skipped"
+                        "Succeeded"
                     ]
                 }
             },
