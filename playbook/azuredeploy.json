@@ -36,9 +36,9 @@
         },
         "JIRAHOST": {
             "type": "string",
-            "defaultValue": "https://int-trackspace.lhsystems.com",
+            "defaultValue": "https://trackspace.lhsystems.com",
             "metadata": {
-                "description": "Trackspace base URL (also the host for the CloneIssueDetails.jspa servlet). Currently the INT environment; switch to https://trackspace.lhsystems.com for production."
+                "description": "Trackspace base URL (also the host for the CloneIssueDetails.jspa servlet). Production is https://trackspace.lhsystems.com; use https://int-trackspace.lhsystems.com for the INT environment."
             }
         },
         "JIRAUserName": {
@@ -67,6 +67,48 @@
             "defaultValue": "OPSLSY-75376",
             "metadata": {
                 "description": "Template Technical change that is server-side cloned each run (carries the Insight/Assets Affected item customfield_24305, which cannot be set via REST). Its numeric id is resolved at runtime."
+            }
+        },
+        "LogAnalyticsResourceID": {
+            "type": "string",
+            "defaultValue": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourcegroups/lsy_weur_itcs_prd_oms_rg_001/providers/microsoft.operationalinsights/workspaces/lsy-prd-oms",
+            "metadata": {
+                "description": "ARM resource id of the Microsoft Sentinel (Log Analytics) workspace whose incidents are managed. Used by the MI-authenticated management REST call that finds the two source incidents."
+            }
+        },
+        "IncidentApiVersion": {
+            "type": "string",
+            "defaultValue": "2023-07-01-preview",
+            "metadata": {
+                "description": "api-version for the Microsoft.SecurityInsights incidents list call."
+            }
+        },
+        "IncidentTitleIoCPrefix": {
+            "type": "string",
+            "defaultValue": "A network session Source address",
+            "metadata": {
+                "description": "Prefix of the network-session IoC incident title (the middle segment is the dynamic IP)."
+            }
+        },
+        "IncidentTitleIoCSuffix": {
+            "type": "string",
+            "defaultValue": "matched an IoC.",
+            "metadata": {
+                "description": "Suffix of the network-session IoC incident title."
+            }
+        },
+        "IncidentTitleMap": {
+            "type": "string",
+            "defaultValue": "#TI Map IP Entity to CommonSecurityLog",
+            "metadata": {
+                "description": "Exact title of the second source incident."
+            }
+        },
+        "IncidentClassificationAndReason": {
+            "type": "string",
+            "defaultValue": "TruePositive - SuspiciousActivity",
+            "metadata": {
+                "description": "Sentinel classification (ClassificationAndReason) applied when the source incidents are closed on the success path."
             }
         },
         "SubtaskIssueTypeName": {
@@ -289,6 +331,30 @@
                         "ExcludedISPs": {
                             "type": "Array",
                             "defaultValue": "[parameters('ExcludedISPs')]"
+                        },
+                        "LogAnalyticsResourceID": {
+                            "type": "String",
+                            "defaultValue": "[parameters('LogAnalyticsResourceID')]"
+                        },
+                        "IncidentApiVersion": {
+                            "type": "String",
+                            "defaultValue": "[parameters('IncidentApiVersion')]"
+                        },
+                        "IncidentTitleIoCPrefix": {
+                            "type": "String",
+                            "defaultValue": "[parameters('IncidentTitleIoCPrefix')]"
+                        },
+                        "IncidentTitleIoCSuffix": {
+                            "type": "String",
+                            "defaultValue": "[parameters('IncidentTitleIoCSuffix')]"
+                        },
+                        "IncidentTitleMap": {
+                            "type": "String",
+                            "defaultValue": "[parameters('IncidentTitleMap')]"
+                        },
+                        "IncidentClassificationAndReason": {
+                            "type": "String",
+                            "defaultValue": "[parameters('IncidentClassificationAndReason')]"
                         }
                     },
                     "triggers": {
@@ -308,6 +374,104 @@
                         }
                     },
                     "actions": {
+                        "Initialize_Incident_Arm_Ids": {
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "Incident_Arm_Ids",
+                                        "type": "array",
+                                        "value": []
+                                    }
+                                ]
+                            },
+                            "runAfter": {}
+                        },
+                        "Find_And_Activate_Incidents": {
+                            "type": "Scope",
+                            "actions": {
+                                "List_Sentinel_Incidents": {
+                                    "type": "Http",
+                                    "inputs": {
+                                        "method": "GET",
+                                        "uri": "https://management.azure.com@{parameters('LogAnalyticsResourceID')}/providers/Microsoft.SecurityInsights/incidents?api-version=@{parameters('IncidentApiVersion')}&%24filter=(properties%2Fstatus%20ne%20%27Closed%27)&%24orderby=properties%2FcreatedTimeUtc%20desc",
+                                        "authentication": {
+                                            "type": "ManagedServiceIdentity"
+                                        }
+                                    },
+                                    "runAfter": {}
+                                },
+                                "Filter_Target_Incidents": {
+                                    "type": "Query",
+                                    "inputs": {
+                                        "from": "@coalesce(body('List_Sentinel_Incidents')?['value'], json('[]'))",
+                                        "where": "@or(and(startsWith(toLower(coalesce(item()?['properties']?['title'], '')), toLower(parameters('IncidentTitleIoCPrefix'))), endsWith(toLower(coalesce(item()?['properties']?['title'], '')), toLower(parameters('IncidentTitleIoCSuffix')))), equals(toLower(coalesce(item()?['properties']?['title'], '')), toLower(parameters('IncidentTitleMap'))))"
+                                    },
+                                    "runAfter": {
+                                        "List_Sentinel_Incidents": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Build_Incident_Ids": {
+                                    "type": "Select",
+                                    "inputs": {
+                                        "from": "@body('Filter_Target_Incidents')",
+                                        "select": "@item()?['id']"
+                                    },
+                                    "runAfter": {
+                                        "Filter_Target_Incidents": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Set_Incident_Arm_Ids": {
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                        "name": "Incident_Arm_Ids",
+                                        "value": "@body('Build_Incident_Ids')"
+                                    },
+                                    "runAfter": {
+                                        "Build_Incident_Ids": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                },
+                                "Activate_Incidents": {
+                                    "type": "Foreach",
+                                    "foreach": "@variables('Incident_Arm_Ids')",
+                                    "actions": {
+                                        "Update_Incident_Active": {
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "put",
+                                                "path": "/Incidents",
+                                                "body": {
+                                                    "incidentArmId": "https://management.azure.com@{item()}",
+                                                    "status": "Active"
+                                                }
+                                            },
+                                            "runAfter": {}
+                                        }
+                                    },
+                                    "runAfter": {
+                                        "Set_Incident_Arm_Ids": [
+                                            "Succeeded"
+                                        ]
+                                    }
+                                }
+                            },
+                            "runAfter": {
+                                "Initialize_Incident_Arm_Ids": [
+                                    "Succeeded"
+                                ]
+                            }
+                        },
                         "Entities_-_Get_IPs": {
                             "type": "ApiConnection",
                             "inputs": {
@@ -320,7 +484,13 @@
                                 "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
                                 "path": "/entities/ip"
                             },
-                            "runAfter": {}
+                            "runAfter": {
+                                "Find_And_Activate_Incidents": [
+                                    "Succeeded",
+                                    "Failed",
+                                    "Skipped"
+                                ]
+                            }
                         },
                         "Get_Jira_password": {
                             "type": "ApiConnection",
@@ -365,7 +535,7 @@
                                 "fileStamp": "@{convertTimeZone(outputs('Capture_Run_Start'), 'UTC', 'Central European Standard Time', 'yyyyMMdd')}",
                                 "displayStart": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 20), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
                                 "displayFinish": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 25), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
-                                "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
+                                "summary": "Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
                             },
                             "runAfter": {
                                 "Capture_Run_Start": [
@@ -1990,14 +2160,44 @@
                                 ]
                             }
                         },
+                        "Comment_Source_Incidents": {
+                            "type": "Foreach",
+                            "foreach": "@variables('Incident_Arm_Ids')",
+                            "actions": {
+                                "Comment_Incident": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "post",
+                                        "path": "/Incidents/Comment",
+                                        "body": {
+                                            "incidentArmId": "https://management.azure.com@{item()}",
+                                            "message": "<p>TI-handler: AbuseIPDB was unavailable, so no IPs were automatically blocked. This incident requires manual intervention. Tracking change: @{variables('Clone_Key')}.</p>"
+                                        }
+                                    },
+                                    "runAfter": {}
+                                }
+                            },
+                            "runAfter": {
+                                "Fallback_Manual_Intervention": [
+                                    "Succeeded"
+                                ]
+                            }
+                        },
                         "Terminate_Manual_Intervention": {
                             "type": "Terminate",
                             "inputs": {
                                 "runStatus": "Succeeded"
                             },
                             "runAfter": {
-                                "Fallback_Manual_Intervention": [
-                                    "Succeeded"
+                                "Comment_Source_Incidents": [
+                                    "Succeeded",
+                                    "Failed",
+                                    "Skipped"
                                 ]
                             }
                         },
@@ -3047,6 +3247,38 @@
                                 ]
                             }
                         },
+                        "Close_Source_Incidents": {
+                            "type": "Foreach",
+                            "foreach": "@variables('Incident_Arm_Ids')",
+                            "actions": {
+                                "Update_Incident_Closed": {
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "put",
+                                        "path": "/Incidents",
+                                        "body": {
+                                            "incidentArmId": "https://management.azure.com@{item()}",
+                                            "status": "Closed",
+                                            "classification": {
+                                                "ClassificationAndReason": "@{parameters('IncidentClassificationAndReason')}",
+                                                "ClassificationReasonText": "Automatically handled in @{variables('Clone_Key')}"
+                                            }
+                                        }
+                                    },
+                                    "runAfter": {}
+                                }
+                            },
+                            "runAfter": {
+                                "Walk_to_Closed": [
+                                    "Succeeded"
+                                ]
+                            }
+                        },
                         "Initialize_Affinity_Cookie": {
                             "type": "InitializeVariable",
                             "inputs": {
@@ -3137,7 +3369,7 @@
                                         "assignee": {
                                             "name": "@{parameters('SubtaskAssigneeName')}"
                                         },
-                                        "description": "This is the manual review to decide whether the automation was successful."
+                                        "description": "Manually check the playbook @{variables('Clone_Key')} runtime results."
                                     }
                                 },
                                 "authentication": {
