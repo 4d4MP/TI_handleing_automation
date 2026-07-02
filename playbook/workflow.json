@@ -22,6 +22,104 @@
             }
         },
         "actions": {
+            "Initialize_Incident_Arm_Ids": {
+                "type": "InitializeVariable",
+                "inputs": {
+                    "variables": [
+                        {
+                            "name": "Incident_Arm_Ids",
+                            "type": "array",
+                            "value": []
+                        }
+                    ]
+                },
+                "runAfter": {}
+            },
+            "Find_And_Activate_Incidents": {
+                "type": "Scope",
+                "actions": {
+                    "List_Sentinel_Incidents": {
+                        "type": "Http",
+                        "inputs": {
+                            "method": "GET",
+                            "uri": "https://management.azure.com@{parameters('LogAnalyticsResourceID')}/providers/Microsoft.SecurityInsights/incidents?api-version=@{parameters('IncidentApiVersion')}&%24filter=(properties%2Fstatus%20ne%20%27Closed%27)&%24orderby=properties%2FcreatedTimeUtc%20desc",
+                            "authentication": {
+                                "type": "ManagedServiceIdentity"
+                            }
+                        },
+                        "runAfter": {}
+                    },
+                    "Filter_Target_Incidents": {
+                        "type": "Query",
+                        "inputs": {
+                            "from": "@coalesce(body('List_Sentinel_Incidents')?['value'], json('[]'))",
+                            "where": "@or(and(startsWith(toLower(coalesce(item()?['properties']?['title'], '')), toLower(parameters('IncidentTitleIoCPrefix'))), endsWith(toLower(coalesce(item()?['properties']?['title'], '')), toLower(parameters('IncidentTitleIoCSuffix')))), equals(toLower(coalesce(item()?['properties']?['title'], '')), toLower(parameters('IncidentTitleMap'))))"
+                        },
+                        "runAfter": {
+                            "List_Sentinel_Incidents": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Build_Incident_Ids": {
+                        "type": "Select",
+                        "inputs": {
+                            "from": "@body('Filter_Target_Incidents')",
+                            "select": "@item()?['id']"
+                        },
+                        "runAfter": {
+                            "Filter_Target_Incidents": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Set_Incident_Arm_Ids": {
+                        "type": "SetVariable",
+                        "inputs": {
+                            "name": "Incident_Arm_Ids",
+                            "value": "@body('Build_Incident_Ids')"
+                        },
+                        "runAfter": {
+                            "Build_Incident_Ids": [
+                                "Succeeded"
+                            ]
+                        }
+                    },
+                    "Activate_Incidents": {
+                        "type": "Foreach",
+                        "foreach": "@variables('Incident_Arm_Ids')",
+                        "actions": {
+                            "Update_Incident_Active": {
+                                "type": "ApiConnection",
+                                "inputs": {
+                                    "host": {
+                                        "connection": {
+                                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                        }
+                                    },
+                                    "method": "put",
+                                    "path": "/Incidents",
+                                    "body": {
+                                        "incidentArmId": "https://management.azure.com@{item()}",
+                                        "status": "Active"
+                                    }
+                                },
+                                "runAfter": {}
+                            }
+                        },
+                        "runAfter": {
+                            "Set_Incident_Arm_Ids": [
+                                "Succeeded"
+                            ]
+                        }
+                    }
+                },
+                "runAfter": {
+                    "Initialize_Incident_Arm_Ids": [
+                        "Succeeded"
+                    ]
+                }
+            },
             "Entities_-_Get_IPs": {
                 "type": "ApiConnection",
                 "inputs": {
@@ -34,7 +132,13 @@
                     "body": "@triggerBody()?['object']?['properties']?['relatedEntities']",
                     "path": "/entities/ip"
                 },
-                "runAfter": {}
+                "runAfter": {
+                    "Find_And_Activate_Incidents": [
+                        "Succeeded",
+                        "Failed",
+                        "Skipped"
+                    ]
+                }
             },
             "Get_Jira_password": {
                 "type": "ApiConnection",
@@ -79,7 +183,7 @@
                     "fileStamp": "@{convertTimeZone(outputs('Capture_Run_Start'), 'UTC', 'Central European Standard Time', 'yyyyMMdd')}",
                     "displayStart": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 20), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
                     "displayFinish": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 25), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
-                    "summary": "[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
+                    "summary": "Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
                 },
                 "runAfter": {
                     "Capture_Run_Start": [
@@ -1704,14 +1808,43 @@
                     ]
                 }
             },
+            "Comment_Source_Incidents": {
+                "type": "Foreach",
+                "foreach": "@variables('Incident_Arm_Ids')",
+                "actions": {
+                    "Comment_Incident": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                }
+                            },
+                            "method": "post",
+                            "path": "/Incidents/Comment",
+                            "body": {
+                                "incidentArmId": "https://management.azure.com@{item()}",
+                                "message": "<p>TI-handler: AbuseIPDB was unavailable, so no IPs were automatically blocked. This incident requires manual intervention. Tracking change: @{variables('Clone_Key')}.</p>"
+                            }
+                        },
+                        "runAfter": {}
+                    }
+                },
+                "runAfter": {
+                    "Fallback_Manual_Intervention": [
+                        "Succeeded"
+                    ]
+                }
+            },
             "Terminate_Manual_Intervention": {
                 "type": "Terminate",
                 "inputs": {
                     "runStatus": "Succeeded"
                 },
                 "runAfter": {
-                    "Fallback_Manual_Intervention": [
-                        "Succeeded"
+                    "Comment_Source_Incidents": [
+                        "Succeeded",
+                        "Failed"
                     ]
                 }
             },
@@ -2761,6 +2894,38 @@
                     ]
                 }
             },
+            "Close_Source_Incidents": {
+                "type": "Foreach",
+                "foreach": "@variables('Incident_Arm_Ids')",
+                "actions": {
+                    "Update_Incident_Closed": {
+                        "type": "ApiConnection",
+                        "inputs": {
+                            "host": {
+                                "connection": {
+                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                }
+                            },
+                            "method": "put",
+                            "path": "/Incidents",
+                            "body": {
+                                "incidentArmId": "https://management.azure.com@{item()}",
+                                "status": "Closed",
+                                "classification": {
+                                    "ClassificationAndReason": "@{parameters('IncidentClassificationAndReason')}",
+                                    "ClassificationReasonText": "Automatically handled in @{variables('Clone_Key')}"
+                                }
+                            }
+                        },
+                        "runAfter": {}
+                    }
+                },
+                "runAfter": {
+                    "Walk_to_Closed": [
+                        "Succeeded"
+                    ]
+                }
+            },
             "Initialize_Affinity_Cookie": {
                 "type": "InitializeVariable",
                 "inputs": {
@@ -2851,7 +3016,7 @@
                             "assignee": {
                                 "name": "@{parameters('SubtaskAssigneeName')}"
                             },
-                            "description": "This is the manual review to decide whether the automation was successful."
+                            "description": "Manually check the playbook @{variables('Clone_Key')} runtime results."
                         }
                     },
                     "authentication": {
@@ -2877,7 +3042,7 @@
         "outputs": {},
         "parameters": {
             "JIRAHOST": {
-                "defaultValue": "https://int-trackspace.lhsystems.com",
+                "defaultValue": "https://trackspace.lhsystems.com",
                 "type": "String"
             },
             "JIRAUserName": {
@@ -2945,6 +3110,30 @@
                     "censys"
                 ],
                 "type": "Array"
+            },
+            "LogAnalyticsResourceID": {
+                "defaultValue": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourcegroups/lsy_weur_itcs_prd_oms_rg_001/providers/microsoft.operationalinsights/workspaces/lsy-prd-oms",
+                "type": "String"
+            },
+            "IncidentApiVersion": {
+                "defaultValue": "2023-07-01-preview",
+                "type": "String"
+            },
+            "IncidentTitleIoCPrefix": {
+                "defaultValue": "A network session Source address",
+                "type": "String"
+            },
+            "IncidentTitleIoCSuffix": {
+                "defaultValue": "matched an IoC.",
+                "type": "String"
+            },
+            "IncidentTitleMap": {
+                "defaultValue": "#TI Map IP Entity to CommonSecurityLog",
+                "type": "String"
+            },
+            "IncidentClassificationAndReason": {
+                "defaultValue": "TruePositive - SuspiciousActivity",
+                "type": "String"
             },
             "$connections": {
                 "type": "Object",

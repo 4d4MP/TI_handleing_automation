@@ -4,21 +4,26 @@
 **Source of truth:** `playbook/workflow.json` + `playbook/azuredeploy.json` in this repo.
 **Trigger:** Microsoft Sentinel incident creation.
 
-The playbook is **fully autonomous** — there is no human approval step. On every
-incident it raises one OPSLSY *Technical change* and drives it to **Planning**, then
-health-checks AbuseIPDB. If AbuseIPDB is healthy it walks the change to **Implementation**,
-enriches the incident IPs, writes the Palo Alto blocklist blob, attaches the CSV, then
-walks the change to **Closed** with resolution **Successful**. If AbuseIPDB is **down** it
-blocks nothing: it attaches a CSV of all incident IPs, comments that manual intervention is
-required, assigns the change to SecOps, and leaves it in **Planning** (see *AbuseIPDB
-outage* below).
+The playbook is **fully autonomous** — there is no human approval step. Launched by a
+Sentinel automation rule on a **relay** incident, it **first** finds the two source
+incidents by title and moves them to **Active**, then raises one OPSLSY *Technical change*
+and drives it to **Planning**, then health-checks AbuseIPDB. If AbuseIPDB is healthy it walks
+the change to **Implementation**, enriches the incident IPs, writes the Palo Alto blocklist
+blob, attaches the CSV, walks the change to **Closed** with resolution **Successful**, and
+**finally** closes the two source incidents as **TruePositive** (comment: `Automatically
+handled in <OPSLSY change key>`). If AbuseIPDB is **down** it blocks nothing: it attaches a
+CSV of all incident IPs, comments that manual intervention is required, assigns the change to
+SecOps, leaves it in **Planning**, and posts a manual-intervention comment on the two source
+incidents while leaving them **Active** (see *AbuseIPDB outage* and *Source incident
+lifecycle* below).
 
 > **History:** this playbook previously opened a **CLOPSSEC** approval Task, waited
 > up to 48 h for an analyst to move it to an approval status, and only then wrote
 > the blocklist. Per a management decision that approval gate was removed and the
 > ticket of record moved to an OPSLSY Technical change. All CLOPSSEC actions, the
-> `Wait_For_Approval` Until loop, the approve/not-approved switch, and every comment
-> the playbook used to write back to the Sentinel incident are gone.
+> `Wait_For_Approval` Until loop, and the approve/not-approved switch are gone. (The
+> playbook again writes to Sentinel, but only to the two *source* incidents it owns —
+> status + classification + a comment — never to the relay incident that triggers it.)
 
 ---
 
@@ -47,8 +52,8 @@ instead of stranding it in Implementation or auto-blocking un-enriched IPs.
 
 All Trackspace calls use **Basic auth** — service account `sentinelsvc` with the
 Key Vault secret `sentinelsvc` (read via the `keyvault-TI-handler` connection,
-flagged `secureData`). Base URL `https://int-trackspace.lhsystems.com/rest/api/2/` (the
-INT environment, set via `JIRAHOST`; switch to `https://trackspace.lhsystems.com` for production).
+flagged `secureData`). Base URL `https://trackspace.lhsystems.com/rest/api/2/` (production,
+set via `JIRAHOST`; switch to `https://int-trackspace.lhsystems.com` for the INT environment).
 
 ### Gateway session affinity (the `Cookie` header)
 
@@ -107,7 +112,7 @@ derives the rest so start/end are consistent. Timestamps are built with `concat`
 | `plannedEnd` | same over `addMinutes(start,25)` → full ISO, **finish +25 min** | `2026-06-12T09:55:00.000+0000` |
 | `displayStart` | `convertTimeZone(addMinutes(start,20),'UTC','Central European Standard Time','yyyy-MM-dd HH:mm')` | `2026-06-12 11:50` |
 | `displayFinish` | `convertTimeZone(addMinutes(start,25),'UTC','Central European Standard Time','yyyy-MM-dd HH:mm')` | `2026-06-12 11:55` |
-| `summary` | `[TEST] - Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` | |
+| `summary` | `Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` | |
 
 The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
 
@@ -226,7 +231,7 @@ issue **has at least one sub-task** (`"Transition is allowed only if the issue h
 | `issuetype.name` | `{SubtaskIssueTypeName}` (default `Approval sub-task`) |
 | `summary` | `Manual review of the automation workflow` |
 | `assignee.name` | `{SubtaskAssigneeName}` — the Jira **login**, default `secops` |
-| `description` | `This is the manual review to decide whether the automation was successful.` |
+| `description` | `Manually check the playbook {Clone_Key} runtime results.` (embeds the OPSLSY change key) |
 
 Jira REST sets `assignee` by login `name`, **not** by display name or email, so
 `SubtaskAssigneeName` must be the login (`secops` for "LSYH, BUD SECOPS"; the email
@@ -315,8 +320,42 @@ blocks nothing:
   `file=` — the same artifact the old flow built.
 
 There is no longer an "empty result → terminate" branch: even with zero kept IPs the
-change is attached-to and walked to Closed so it never stalls. **No comments are
-written back to the Sentinel incident** at any point.
+change is attached-to and walked to Closed so it never stalls.
+
+---
+
+## Source incident lifecycle
+
+The playbook is launched by an automation rule on a **relay** incident (whose
+`relatedEntities` drive the IP extraction). It additionally owns two *source* incidents:
+
+- **Incident A** — title starts with `IncidentTitleIoCPrefix` ("A network session Source address") and ends with `IncidentTitleIoCSuffix` ("matched an IoC."); the middle segment is the offending IP.
+- **Incident B** — title equals `IncidentTitleMap` ("#TI Map IP Entity to CommonSecurityLog").
+
+**Find (first action, before `Entities - Get IPs`).** `List_Sentinel_Incidents`
+(`GET https://management.azure.com{LogAnalyticsResourceID}/providers/Microsoft.SecurityInsights/incidents?api-version={IncidentApiVersion}&$filter=(properties/status ne 'Closed')&$orderby=properties/createdTimeUtc desc`,
+managed identity) lists open incidents; `Filter_Target_Incidents` keeps the two by title;
+`Set_Incident_Arm_Ids` stores their ARM ids in the `Incident_Arm_Ids` variable. If neither is
+present the array is empty and every incident step below is a graceful no-op —
+`Entities - Get IPs` runs after this scope on `Succeeded`/`Failed`/`Skipped`, so a Sentinel
+hiccup never blocks the blocking mission.
+
+**Activate (still first).** `Activate_Incidents` (Foreach) → `Update_Incident_Active`
+(azuresentinel `PUT /Incidents`, body `{incidentArmId:"https://management.azure.com{id}", status:"Active"}`).
+
+**Close (last, success path only).** After `Walk_to_Closed`, `Close_Source_Incidents`
+(Foreach over the stored ids) → `Update_Incident_Closed` (`PUT /Incidents`, `status: Closed`,
+`classification.ClassificationAndReason = {IncidentClassificationAndReason}` (default
+`TruePositive - SuspiciousActivity`), `ClassificationReasonText = "Automatically handled in {Clone_Key}"`).
+
+**Fallback (AbuseIPDB down).** The incidents stay **Active**; `Comment_Source_Incidents`
+(Foreach) → `Comment_Incident` (azuresentinel `POST /Incidents/Comment`) posts a
+manual-intervention note referencing `{Clone_Key}`, then `Terminate_Manual_Intervention` ends
+the run `Succeeded`.
+
+The pattern (MI mgmt-REST find + azuresentinel `PUT /Incidents` / `POST /Incidents/Comment`)
+mirrors the org's `trackspacejira_ticket_close.json`. The MI's *Microsoft Sentinel Responder*
+role covers list/read/update/comment — no new RBAC. The **relay** incident is never modified.
 
 ---
 
@@ -338,6 +377,12 @@ Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
 | `MinReports` | `100` |
 | `ExcludedISPs` | `["akamai technologies","google","palo alto networks","the shadowserver foundation","censys"]` |
 | `StorageAccountName` / `BlocklistContainer` / `BlocklistBlobPath` | `lsyweuritcsprdmspalo001` / `$web` / `index.html` |
+| `JIRAHOST` | `https://trackspace.lhsystems.com` (production; INT is `https://int-trackspace.lhsystems.com`) |
+| `LogAnalyticsResourceID` | `…/resourcegroups/lsy_weur_itcs_prd_oms_rg_001/…/workspaces/lsy-prd-oms` (Sentinel workspace whose source incidents are managed) |
+| `IncidentApiVersion` | `2023-07-01-preview` |
+| `IncidentTitleIoCPrefix` / `IncidentTitleIoCSuffix` | `A network session Source address` / `matched an IoC.` |
+| `IncidentTitleMap` | `#TI Map IP Entity to CommonSecurityLog` |
+| `IncidentClassificationAndReason` | `TruePositive - SuspiciousActivity` |
 
 ---
 
@@ -356,9 +401,12 @@ az deployment group create \
   --parameters @playbook/azuredeploy.parameters.json
 ```
 
-Managed-identity RBAC (unchanged): Microsoft Sentinel Responder on the workspace,
-Key Vault Secrets User on the Key Vault, Storage Blob Data Contributor on the
-blocklist storage account. KV/Sentinel/AbuseIPDB connection wiring is unchanged.
+Managed-identity RBAC (unchanged roles): **Microsoft Sentinel Responder** on the workspace
+(now exercised for both reading incident entities **and** listing/updating the source
+incidents' status/classification + posting comments — Responder already grants incident
+write), Key Vault Secrets User on the Key Vault, Storage Blob Data Contributor on the
+blocklist storage account. KV/Sentinel/AbuseIPDB connection wiring is unchanged. The MI must
+have Responder on the `LogAnalyticsResourceID` workspace (default `lsy-prd-oms`).
 
 Logic App runs are immutable: after a redeploy, cancel any stuck in-flight runs and
 fire fresh ones — do not expect a redeploy to mutate a run already in progress.

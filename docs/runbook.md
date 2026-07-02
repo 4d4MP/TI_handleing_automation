@@ -7,6 +7,10 @@ rolling back a block.
 
 ## What happens on a run
 
+0. **First, before anything else:** the two source Sentinel incidents are found by title
+   (Incident A "A network session Source address … matched an IoC."; Incident B
+   "#TI Map IP Entity to CommonSecurityLog") and moved to **Active**. If they aren't present,
+   the run continues normally (they are optional).
 1. An OPSLSY *Technical change* (clone of `OPSLSY-75376`) is created and walked to
    **Planning**.
 2. AbuseIPDB is health-checked. **If it is down, nothing is blocked** — see *AbuseIPDB
@@ -16,6 +20,8 @@ rolling back a block.
    `lsyweuritcsprdmspalo001/$web/index.html` (line-level deduped).
 4. The CSV of blocked IPs is attached to the change.
 5. The change is walked to **Closed** with resolution **Successful**.
+6. **Last, on the success path:** the two source incidents are moved to **Closed /
+   TruePositive** with the comment `Automatically handled in <OPSLSY change key>`.
 
 ### AbuseIPDB down (manual-intervention fallback)
 
@@ -24,22 +30,27 @@ could include addresses that must never be blocked). Instead it attaches a CSV o
 incident IPs, posts a comment that AbuseIPDB failed and manual intervention is required,
 assigns the change to **SecOps** (`SubtaskAssigneeName`), and **leaves it in Planning**. The
 blocklist blob is untouched and the Logic App run still ends **Succeeded**. A SecOps engineer
-must review the attached IPs and apply/close the change by hand.
+must review the attached IPs and apply/close the change by hand. On this path the two source
+Sentinel incidents are **left Active** and a comment is posted on each noting AbuseIPDB was
+unavailable, nothing was blocked, and manual intervention is required (referencing the OPSLSY
+change key) — they are **not** auto-closed.
 
-**No comments are posted to the Sentinel incident.** To see what a run did, open the
-OPSLSY change (description, attachment, history) and/or inspect the blocklist blob.
+The playbook drives the two source Sentinel incidents' lifecycle (Active at start; Closed /
+TruePositive on success, or a manual-intervention comment on the fallback). It does not touch
+the relay incident that triggers the automation rule. To see what a run did, open the OPSLSY
+change (description, attachment, history), the source incidents, and/or the blocklist blob.
 
 ## Finding the change for an incident
 
-The change summary is `[TEST] - Block malicious/suspicious IPs reported by Microsoft
+The change summary is `Block malicious/suspicious IPs reported by Microsoft
 Sentinel Threat Intelligence - {yyyy.MM.dd}`. The Logic App run history for `TI-handler`
 shows the cloned issue key in the `Find_Clone_Key` step (the `Clone_Key` variable). Open
 it in Trackspace:
 
 ```
-https://int-trackspace.lhsystems.com/browse/OPSLSY-<n>
+https://trackspace.lhsystems.com/browse/OPSLSY-<n>
 ```
-(INT environment — the current `JIRAHOST`; use `https://trackspace.lhsystems.com` for production.)
+(Production — the current `JIRAHOST`; use `https://int-trackspace.lhsystems.com` for the INT environment.)
 
 The attachment `RESULT_Check_MS_threat_Intelligence_IPs_against_AbuseIPDB-YYYYMMDD.csv` (date
 in the Budapest zone, no separators) lists the IPs that were

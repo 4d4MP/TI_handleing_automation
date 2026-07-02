@@ -2,24 +2,33 @@
 
 ## Purpose
 
-When a Microsoft Sentinel incident is created, this playbook **autonomously**:
+When a Microsoft Sentinel automation rule launches this playbook on a **relay** incident, it **autonomously**:
 
-1. Pulls IP entities from the incident.
+0. **First:** finds the two source incidents by title — Incident A ("A network session Source address … matched an IoC.") and Incident B ("#TI Map IP Entity to CommonSecurityLog") — and moves them to **Active**. If they are absent the run proceeds normally.
+1. Pulls IP entities from the (relay) incident.
 2. Raises an OPSLSY *Technical change* (a logical clone of the template `OPSLSY-75376`) and walks it to **Planning**.
 3. Health-checks AbuseIPDB. **If it is down, nothing is blocked**: a CSV of all incident IPs is attached, a "manual intervention required" comment is posted, the change is assigned to SecOps and **left in Planning**, and the run ends Succeeded. Otherwise the change is walked to **Implementation** and enrichment proceeds.
 4. Enriches each IP against AbuseIPDB and filters out IPs below the report threshold or owned by an ignored ISP.
 5. Appends the surviving IPs (one per line, deduped) to a static-site blocklist blob — **ungated**; there is no approval.
 6. Attaches the CSV report to the change.
 7. Walks the change to **Closed** with resolution **Successful**.
+8. **Last (success path):** moves the two source incidents to **Closed / TruePositive** with the comment `Automatically handled in <OPSLSY change key>`. On the AbuseIPDB-down fallback they are instead left **Active** with a manual-intervention comment.
 
-The whole flow runs in a single Azure Logic App (Consumption). There is no Python — the filter loop lives entirely in the workflow. There is **no human approval** and **no CLOPSSEC ticket** (both removed); no comments are written back to the Sentinel incident.
+The whole flow runs in a single Azure Logic App (Consumption). There is no Python — the filter loop lives entirely in the workflow. There is **no human approval** and **no CLOPSSEC ticket** (both removed). The playbook manages the two *source* incidents' status/classification and posts comments to them; it does not touch the *relay* incident that fires the automation rule.
 
 ## Sequence
 
 ```
-Sentinel incident trigger
+Sentinel incident trigger (relay incident)
   │
-  ├─► Entities - Get IPs          (Sentinel connector)
+  ├─► Initialize_Incident_Arm_Ids  (root-level array variable)
+  ├─► Find_And_Activate_Incidents  (runs FIRST; Entities waits on it)
+  │       ├─ List_Sentinel_Incidents  (Http GET mgmt REST, MI; $filter status ne 'Closed', newest first)
+  │       ├─ Filter_Target_Incidents  (title A prefix+suffix OR title B exact)
+  │       ├─ Build_Incident_Ids / Set_Incident_Arm_Ids  (store matched ARM ids)
+  │       └─ Activate_Incidents (Foreach) → Update_Incident_Active (put /Incidents, status Active)
+  │
+  ├─► Entities - Get IPs          (Sentinel connector; runAfter Find_And_Activate_Incidents S/F/Skipped)
   ├─► Get_Jira_password           (Key Vault, secureData)
   ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart/End, dateStamp, fileStamp, displayStart/Finish in CET, summary)
   ├─► Initialize Excluded_IPs / Block_IPs / CSV_Rows / Clone_Key  (root-level variables)
@@ -44,15 +53,17 @@ Sentinel incident trigger
   │                                       ├─ Select_Fallback_Rows (all incident IPs → {ip})
   │                                       ├─ Build_Fallback_CSV (Table/CSV)
   │                                       ├─ Attach_Fallback_CSV (POST /attachments)
-  │                                       ├─ Comment_Manual_Intervention (POST /comment)
+  │                                       ├─ Comment_Manual_Intervention (POST /comment on Jira change)
   │                                       └─ Assign_To_SecOps (PUT /assignee = {SubtaskAssigneeName})
+  │                                     → Comment_Source_Incidents (Foreach) → Comment_Incident (post /Incidents/Comment; incidents LEFT Active)
   │                                     → Terminate_Manual_Intervention (runStatus Succeeded)
   │
   ├─► Build_CSV                    (Table/CSV from CSV_Rows ; runs only after Enrichment_Scope)
   ├─► Write_Blocklist_Blob         (ungated: GET blob → dedupe Block_IPs → PUT if anything new)
   ├─► Attach_CSV_to_Jira           (POST /issue/{key}/attachments, multipart)
   ├─► Walk_to_Post_Implementation_Review  (POST resolution=Successful + actual start/finish, poll)
-  └─► Walk_to_Closed               (POST resolution=Successful, poll until Closed / statusCategory done)
+  ├─► Walk_to_Closed               (POST resolution=Successful, poll until Closed / statusCategory done)
+  └─► Close_Source_Incidents (Foreach) → Update_Incident_Closed (put /Incidents, status Closed + classification TruePositive, comment "Automatically handled in {Clone_Key}")
 ```
 
 ## Resources
@@ -60,12 +71,12 @@ Sentinel incident trigger
 | Resource | Type | Purpose |
 |---|---|---|
 | `Microsoft.Logic/workflows` | Logic App (Consumption) | The playbook itself, with a system-assigned managed identity. |
-| `Microsoft.Web/connections` (azuresentinel) | API connection — created by this template | Sentinel incident trigger + `entities/ip`. Auth: managed identity. |
+| `Microsoft.Web/connections` (azuresentinel) | API connection — created by this template | Sentinel incident trigger, `entities/ip`, and incident lifecycle (`PUT /Incidents` status/classification, `POST /Incidents/Comment`). Auth: managed identity. |
 | `Microsoft.Web/connections` (keyvault) | API connection — created by this template | Reads the Trackspace service-account password. Auth: managed identity. |
 | `Microsoft.Web/connections/abuseipdbapi-1` | API connection — **OMS-backed, referenced not created** | Backs the AbuseIPDB custom connector. Carries its own AbuseIPDB API key inside the connection resource. |
 | Static-site storage account | External | Hosts the blocklist blob (`$web/index.html`). |
 
-The Sentinel connection is now only used by the **trigger** and `entities/ip` — the playbook no longer posts incident comments.
+The Sentinel connection is used by the **trigger**, `entities/ip`, and the source-incident lifecycle: a managed-identity `GET` to the SecurityInsights management REST API finds the two source incidents by title, then the azuresentinel connector `PUT /Incidents` (status Active at start, status Closed + classification TruePositive at end) and `POST /Incidents/Comment` (fallback path) update them. The workspace is `LogAnalyticsResourceID` (default `lsy-prd-oms`).
 
 AbuseIPDB calls go through the OMS-owned custom connector (cross-RG reference). This playbook references the existing connection by resource ID; it does not create, modify, or rotate it.
 
@@ -77,7 +88,7 @@ Grant on the Logic App's system-assigned identity after first deploy (the ARM te
 
 | Scope | Role | Why |
 |---|---|---|
-| Sentinel workspace | `Microsoft Sentinel Responder` | Read incident entities. |
+| Sentinel workspace | `Microsoft Sentinel Responder` | Read incident entities; list/read incidents (mgmt REST) and update their status/classification + post comments. |
 | Key Vault holding the Jira secret | `Key Vault Secrets User` | Read the Trackspace service-account password. |
 | Blocklist storage account | `Storage Blob Data Contributor` | GET + PUT on `$web/index.html`. |
 
@@ -132,7 +143,7 @@ The PUT is unconditional (no `If-Match` / blob lease). Two runs reaching the blo
 - **Health-check gates Implementation.** The change is advanced to Implementation *only after* `AbuseIPDB_health_check` succeeds. If AbuseIPDB is down the change is deliberately left in **Planning** and handed to SecOps (CSV + comment + assignee) rather than auto-blocking un-enriched IPs. On the healthy path the close walk runs after the blob write + attachment.
 - **Name-driven walk, not hardcoded ids.** Survives test↔prod transition-id drift; the skip-list avoids revoke/withdraw/reject/cancel edges.
 - **Poll-until-landed after each transition.** Trackspace transitions can drop the connection while still committing; trusting the POST response would misreport state.
-- **Gateway session-affinity cookie.** INT Trackspace is behind an Azure Application Gateway with cookie-based affinity that `307`-redirects the first cookieless request to plant `ApplicationGatewayAffinity`/`JSESSIONID`. A `Prime_Affinity_Cookie` GET (its `307` tolerated) captures that `Set-Cookie`; `Build_Cookie_Parts`/`Set_Affinity_Cookie` reduce it to a `name=value; …` string in the `Affinity_Cookie` variable; every Jira HTTP call then sends `Cookie: @variables('Affinity_Cookie')` so the gateway serves the pinned backend instead of looping on `307`. Empty/harmless where a gateway doesn't use affinity.
+- **Gateway session-affinity cookie.** Trackspace can sit behind an Azure Application Gateway with cookie-based affinity that `307`-redirects the first cookieless request to plant `ApplicationGatewayAffinity`/`JSESSIONID` (observed on INT). A `Prime_Affinity_Cookie` GET (its `307` tolerated) captures that `Set-Cookie`; `Build_Cookie_Parts`/`Set_Affinity_Cookie` reduce it to a `name=value; …` string in the `Affinity_Cookie` variable; every Jira HTTP call then sends `Cookie: @variables('Affinity_Cookie')` so the gateway serves the pinned backend instead of looping on `307`. Empty/harmless where a gateway doesn't use affinity.
 - **No Function App.** Filtering is small and rare; keeping it in the Logic App removes a deploy target.
 - **Parallel enrichment (`concurrency.repetitions = 50`).** Each iteration only does its HTTP call + `Compose_Row`; `result()` is reshaped afterwards into report rows and the kept set. Ordering becomes completion order; nothing downstream depends on it.
 - **Resilient per-IP enrichment + safe outage fallback.** A failed `/check` is caught per iteration; a total AbuseIPDB outage routes to the manual-intervention fallback (CSV + comment + SecOps assignment, left in Planning, nothing blocked) instead of auto-blocking un-enriched IPs or aborting.

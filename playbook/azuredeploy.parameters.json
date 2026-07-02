@@ -12,7 +12,7 @@
             "value": "LSY-WEUR-ITCS-PRD-KV-02"
         },
         "JIRAHOST": {
-            "value": "https://int-trackspace.lhsystems.com"
+            "value": "https://trackspace.lhsystems.com"
         },
         "JIRAUserName": {
             "value": "sentinelsvc"
@@ -25,6 +25,24 @@
         },
         "TemplateIssueKey": {
             "value": "OPSLSY-75376"
+        },
+        "LogAnalyticsResourceID": {
+            "value": "/subscriptions/f12b729d-7c1e-4407-bb9d-2e7ec4aa1d29/resourcegroups/lsy_weur_itcs_prd_oms_rg_001/providers/microsoft.operationalinsights/workspaces/lsy-prd-oms"
+        },
+        "IncidentApiVersion": {
+            "value": "2023-07-01-preview"
+        },
+        "IncidentTitleIoCPrefix": {
+            "value": "A network session Source address"
+        },
+        "IncidentTitleIoCSuffix": {
+            "value": "matched an IoC."
+        },
+        "IncidentTitleMap": {
+            "value": "#TI Map IP Entity to CommonSecurityLog"
+        },
+        "IncidentClassificationAndReason": {
+            "value": "TruePositive - SuspiciousActivity"
         },
         "SubtaskIssueTypeName": {
             "value": "Approval sub-task"
