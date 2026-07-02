@@ -2196,8 +2196,7 @@
                             "runAfter": {
                                 "Comment_Source_Incidents": [
                                     "Succeeded",
-                                    "Failed",
-                                    "Skipped"
+                                    "Failed"
                                 ]
                             }
                         },
