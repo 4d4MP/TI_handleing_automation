@@ -177,12 +177,12 @@
             "Compute_Run_Times": {
                 "type": "Compose",
                 "inputs": {
-                    "plannedStart": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 20), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 20), 'HH:mm:ss'), '.000+0000')}",
-                    "plannedEnd": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 25), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 25), 'HH:mm:ss'), '.000+0000')}",
+                    "plannedStart": "@{concat(formatDateTime(outputs('Capture_Run_Start'), 'yyyy-MM-dd'), 'T', formatDateTime(outputs('Capture_Run_Start'), 'HH:mm:ss'), '.000+0000')}",
+                    "plannedEnd": "@{concat(formatDateTime(addMinutes(outputs('Capture_Run_Start'), 10), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(outputs('Capture_Run_Start'), 10), 'HH:mm:ss'), '.000+0000')}",
                     "dateStamp": "@{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}",
                     "fileStamp": "@{convertTimeZone(outputs('Capture_Run_Start'), 'UTC', 'Central European Standard Time', 'yyyyMMdd')}",
-                    "displayStart": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 20), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
-                    "displayFinish": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 25), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
+                    "displayStart": "@{convertTimeZone(outputs('Capture_Run_Start'), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
+                    "displayFinish": "@{convertTimeZone(addMinutes(outputs('Capture_Run_Start'), 10), 'UTC', 'Central European Standard Time', 'yyyy-MM-dd HH:mm')}",
                     "summary": "Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - @{formatDateTime(outputs('Capture_Run_Start'), 'yyyy.MM.dd')}"
                 },
                 "runAfter": {
@@ -3016,7 +3016,7 @@
                             "assignee": {
                                 "name": "@{parameters('SubtaskAssigneeName')}"
                             },
-                            "description": "Manually check the playbook @{variables('Clone_Key')} runtime results."
+                            "description": "Manually check the playbook runtime results. Logic App run id: @{workflow()?['run']?['name']}"
                         }
                     },
                     "authentication": {

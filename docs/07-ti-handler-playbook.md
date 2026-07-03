@@ -108,15 +108,15 @@ derives the rest so start/end are consistent. Timestamps are built with `concat`
 |---|---|---|
 | `dateStamp` | `formatDateTime(start,'yyyy.MM.dd')` (for the summary) | `2026.06.12` |
 | `fileStamp` | `convertTimeZone(start,'UTC','Central European Standard Time','yyyyMMdd')` (for the attachment name) | `20260612` |
-| `plannedStart` | `concat(... addMinutes(start,20) ...)` → full ISO, **start +20 min** | `2026-06-12T09:50:00.000+0000` |
-| `plannedEnd` | same over `addMinutes(start,25)` → full ISO, **finish +25 min** | `2026-06-12T09:55:00.000+0000` |
-| `displayStart` | `convertTimeZone(addMinutes(start,20),'UTC','Central European Standard Time','yyyy-MM-dd HH:mm')` | `2026-06-12 11:50` |
-| `displayFinish` | `convertTimeZone(addMinutes(start,25),'UTC','Central European Standard Time','yyyy-MM-dd HH:mm')` | `2026-06-12 11:55` |
+| `plannedStart` | `concat(... start ...)` → full ISO, **= run start** | `2026-06-12T09:30:00.000+0000` |
+| `plannedEnd` | same over `addMinutes(start,10)` → full ISO, **start +10 min** | `2026-06-12T09:40:00.000+0000` |
+| `displayStart` | `convertTimeZone(start,'UTC','Central European Standard Time','yyyy-MM-dd HH:mm')` | `2026-06-12 11:30` |
+| `displayFinish` | `convertTimeZone(addMinutes(start,10),'UTC','Central European Standard Time','yyyy-MM-dd HH:mm')` | `2026-06-12 11:40` |
 | `summary` | `Block malicious/suspicious IPs reported by Microsoft Sentinel Threat Intelligence - {dateStamp}` | |
 
 The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
 
-> **All time fields share one source — run start + 20 min (start) / + 25 min (finish).**
+> **All time fields share one source — the run start instant (finish = start + 10 min).**
 > `Compute_Run_Times` produces the start time in two forms: full ISO `+0000`
 > (`plannedStart`/`plannedEnd`, for the Jira datetime fields) and a human-readable string
 > (`displayStart`/`displayFinish`, for the description). The Jira datetime fields are stored
@@ -126,12 +126,15 @@ The `+0000` offset is sent literally as Jira expects; `utcNow()` is UTC.
 > *Accurate start/finish* read **the same wall-clock time** Jira shows for Planned start/end
 > (`customfield_22500`/`22501`, set on the Override PUT **and** re-affirmed on the
 > Implementation transition) and Actual start/finish (`customfield_23600`/`23601`, on the
-> PIR transition) — earlier they disagreed by the +2 h UTC↔CEST offset. The **+20 min**
-> offset is the safety margin: the *Start implementation* validator rejects a past Planned
-> start, and +20 from run start stays comfortably in the future by the time the walk reaches
-> that hop (which is only a few minutes in). No
-> per-hop recomputation and no `Planned_*` variables — one base instant, used everywhere,
+> PIR transition). Start = the run start instant (**no offset**); finish = start + 10 min.
+> No per-hop recomputation and no `Planned_*` variables — one base instant, used everywhere,
 > so planned, actual, and the human-readable description never disagree.
+>
+> ⚠️ **Note:** the Planned start is now the run start with **no future buffer**. The
+> *Start implementation* transition validator rejects a *past* Planned start, so if the prod
+> workflow enforces it, the Implementation transition may fail once the walk (a few minutes)
+> pushes the run start into the past. The previous +20 min buffer existed to avoid this; it
+> was removed by request.
 
 ### Clone mechanism (headless, confirmed working)
 
@@ -190,9 +193,10 @@ The clone copies the template's old body/dates, so `Override_Clone_Fields`
 (`PUT /rest/api/2/issue/{Clone_Key}`) overrides the `description` (body below, with the
 Accurate start/finish lines from `displayStart`/`displayFinish`) and sets
 `customfield_22500`/`22501` (Planned start/end) from `plannedStart`/`plannedEnd`
-(run start +20/+25). The Implementation transition re-sends the **same** `plannedStart`/
-`plannedEnd` (to satisfy the *Start implementation* non-past validator at transition time),
-so the value is identical in both places. The **summary** is already correct from the
+(run start / run start +10). The Implementation transition re-sends the **same** `plannedStart`/
+`plannedEnd`, so the value is identical in both places. (Note: Planned start now carries no
+future buffer — see the ⚠️ note under *Runtime values* about the non-past-start validator.)
+The **summary** is already correct from the
 clone. Everything else — Category, Type, Reason, Impact, Risk, Owner, Change manager,
 Change tested, Rollback, Validation, **Affected item** — is inherited from the template and
 left untouched.
@@ -231,7 +235,7 @@ issue **has at least one sub-task** (`"Transition is allowed only if the issue h
 | `issuetype.name` | `{SubtaskIssueTypeName}` (default `Approval sub-task`) |
 | `summary` | `Manual review of the automation workflow` |
 | `assignee.name` | `{SubtaskAssigneeName}` — the Jira **login**, default `secops` |
-| `description` | `Manually check the playbook {Clone_Key} runtime results.` (embeds the OPSLSY change key) |
+| `description` | `Manually check the playbook runtime results. Logic App run id: {workflow()['run']['name']}` (embeds the unique Logic App run id for traceability) |
 
 Jira REST sets `assignee` by login `name`, **not** by display name or email, so
 `SubtaskAssigneeName` must be the login (`secops` for "LSYH, BUD SECOPS"; the email
@@ -281,8 +285,8 @@ implementation review→Closed `111`. Standard Change skips the approval stages.
 | Walk step | target status | POST body fields |
 |---|---|---|
 | 1. Planning | `Planning` | *(none — just `transition.id`)* |
-| 2. Implementation | `Implementation` | `customfield_22500 = plannedStart`, `customfield_22501 = plannedEnd` (run start +20/+25) — re-sent on the transition so the *Start implementation* validator sees a non-past Planned start. The +20 min offset keeps it in the future even after the few minutes the walk takes to reach this hop. |
-| 3. Post implementation review | `Post implementation review` | `resolution = { "name": "Successful" }`, `customfield_23600 = plannedStart`, `customfield_23601 = plannedEnd` (Actual start/finish = the **same** +20/+25 values; only settable on this transition screen) |
+| 2. Implementation | `Implementation` | `customfield_22500 = plannedStart`, `customfield_22501 = plannedEnd` (run start / run start +10) — re-sent on the transition. ⚠️ Planned start now carries **no** future buffer, so the *Start implementation* validator (which rejects a past Planned start) is no longer accommodated; see the note under *Runtime values*. |
+| 3. Post implementation review | `Post implementation review` | `resolution = { "name": "Successful" }`, `customfield_23600 = plannedStart`, `customfield_23601 = plannedEnd` (Actual start/finish = the **same** run start / +10 values; only settable on this transition screen) |
 | 4. Closed | `Closed` | `resolution = { "name": "Successful" }` |
 
 The close poll stops when the status name contains `Closed` **or** its
