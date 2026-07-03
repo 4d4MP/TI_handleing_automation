@@ -45,9 +45,18 @@
             "value": "TruePositive - SuspiciousActivity"
         },
         "SubtaskIssueTypeName": {
-            "value": "Approval sub-task"
+            "value": "Sub-task"
         },
         "SubtaskAssigneeName": {
+            "value": "sentinelsvc"
+        },
+        "SubtaskApprovedStatusName": {
+            "value": "Approved"
+        },
+        "SubtaskRejectedStatusName": {
+            "value": "Rejected"
+        },
+        "MainTicketAssigneeName": {
             "value": "secops"
         },
         "StatusPlanningName": {

@@ -4,18 +4,22 @@
 **Source of truth:** `playbook/workflow.json` + `playbook/azuredeploy.json` in this repo.
 **Trigger:** Microsoft Sentinel incident creation.
 
-The playbook is **fully autonomous** — there is no human approval step. Launched by a
-Sentinel automation rule on a **relay** incident, it **first** finds the two source
-incidents by title and moves them to **Active**, then raises one OPSLSY *Technical change*
-and drives it to **Planning**, then health-checks AbuseIPDB. If AbuseIPDB is healthy it walks
-the change to **Implementation**, enriches the incident IPs, writes the Palo Alto blocklist
-blob, attaches the CSV, walks the change to **Closed** with resolution **Successful**, and
-**finally** closes the two source incidents as **TruePositive** (comment: `Automatically
-handled in <OPSLSY change key>`). If AbuseIPDB is **down** it blocks nothing: it attaches a
-CSV of all incident IPs, comments that manual intervention is required, assigns the change to
-SecOps, leaves it in **Planning**, and posts a manual-intervention comment on the two source
-incidents while leaving them **Active** (see *AbuseIPDB outage* and *Source incident
-lifecycle* below).
+The playbook runs autonomously to **Post-implementation review, then stops for manual
+review** — no human approval *gate* mid-run, but the final Close is left to a human. Launched
+by a Sentinel automation rule on a **relay** incident, it **first** finds the two source
+incidents by title and moves them to **Active**, creates a **run-record sub-task** (type
+`Sub-task`, assigned to the `sentinelsvc` service account), then raises one OPSLSY *Technical
+change* and drives it to **Planning**, then health-checks AbuseIPDB. If AbuseIPDB is healthy
+it walks the change to **Implementation**, enriches the incident IPs, writes the Palo Alto
+blocklist blob, attaches the CSV, walks the change to **Post-implementation review**, assigns
+the change to **SecOps**, moves the run-record sub-task to **Approved**, closes the two source
+incidents as **TruePositive**, and **stops** — leaving the change in Post-implementation review
+for a human to close. If AbuseIPDB is **down** it blocks nothing: it attaches a CSV of all
+incident IPs, comments that manual intervention is required, assigns the change to SecOps,
+leaves it in **Planning**, comments on the source incidents (left **Active**), and moves the
+run-record sub-task to **Rejected**. If the run **fails** at any point after the sub-task is
+created, the sub-task is moved to **Rejected** and the run ends Failed (see *AbuseIPDB
+outage*, *Run-record sub-task*, and *Source incident lifecycle* below).
 
 > **History:** this playbook previously opened a **CLOPSSEC** approval Task, waited
 > up to 48 h for an analyst to move it to an approval status, and only then wrote
@@ -33,22 +37,33 @@ lifecycle* below).
 trigger
   → clone OPSLSY-75376          (CloneIssueDetails.jspa servlet) + find new key by search
   → override fields             (PUT description + planned start/end; summary set at clone)
-  → walk to Planning            (Open → Planning)
-  → AbuseIPDB health check
-       ├─ healthy → walk to Implementation   (Planning → Implementation)
-       │            → enrich + build CSV      (AbuseIPDB filter/dedupe → kept-IP rows)
-       │            → write blocklist blob    (ungated — the actual change being implemented)
-       │            → attach CSV              (POST /issue/{key}/attachments)
-       │            → walk to Closed          (Post implementation review → Closed, resolution Successful)
-       └─ down → attach CSV of ALL IPs + comment + assign SecOps, LEFT in Planning
-                 → Terminate (runStatus Succeeded)
+  → create run-record sub-task  (type Sub-task, assignee sentinelsvc) + capture Subtask_Key
+  → Run_Change (scope: whole change lifecycle; on any failure inside → run ends Failed)
+       → walk to Planning            (Open → Planning)
+       → AbuseIPDB health check
+            ├─ healthy → walk to Implementation   (Planning → Implementation)
+            │            → enrich + build CSV      (AbuseIPDB filter/dedupe → kept-IP rows)
+            │            → write blocklist blob    (ungated — the actual change being implemented)
+            │            → attach CSV              (POST /issue/{key}/attachments)
+            │            → walk to Post-implementation review (resolution Successful) → Run_Outcome='success'
+            └─ down → attach CSV of ALL IPs + comment + assign SecOps (LEFT in Planning)
+                      → comment source incidents → Run_Outcome='fallback'
+  → On success (Run_Change Succeeded, Run_Outcome='success'):
+       assign main change → SecOps ; sub-task → Approved ; close source incidents (TruePositive)
+       → Terminate Succeeded   (STOP — change LEFT in Post-implementation review for manual close)
+  → On fallback (Run_Outcome='fallback'): sub-task → Rejected → Terminate Succeeded
+  → On failure (Run_Change Failed): sub-task → Rejected → Terminate Failed (captured message)
 ```
 
-On the healthy path the change sits in **Implementation** for the duration of the real
-work (enrichment + blocklist write), matching change-management semantics, then closes when
-the work is done. The change is advanced to Implementation **only after** the AbuseIPDB
-health check succeeds — so an AbuseIPDB outage leaves it safely in Planning for SecOps
-instead of stranding it in Implementation or auto-blocking un-enriched IPs.
+On the healthy path the change sits in **Implementation** for the real work (enrichment +
+blocklist write), then advances to **Post-implementation review** where the automation
+**stops** — the change is deliberately **not** walked to Closed; a human reviews and closes
+it. The change is advanced to Implementation **only after** the AbuseIPDB health check
+succeeds — so an AbuseIPDB outage leaves it safely in Planning for SecOps instead of stranding
+it in Implementation or auto-blocking un-enriched IPs. The entire change lifecycle runs inside
+a `Run_Change` scope; **any** unhandled failure inside it (a structured transition guard, or a
+raw HTTP error) fails the scope and routes to the failure handler, which moves the run-record
+sub-task to **Rejected** and ends the run Failed.
 
 All Trackspace calls use **Basic auth** — service account `sentinelsvc` with the
 Key Vault secret `sentinelsvc` (read via the `keyvault-TI-handler` connection,
@@ -220,33 +235,43 @@ Blocked IPs can be found in the attachment.
 
 (The `Time frame` line was changed 30 → 5 minutes to match the planned window.)
 
-### Approval sub-task (required before Implementation)
+### Run-record sub-task (created before any technical change)
 
-The *Start implementation* transition has a validator that rejects the move unless the
-issue **has at least one sub-task** (`"Transition is allowed only if the issue has sub-task"`).
-`Create_Approval_Subtask` runs after `Override_Clone_Fields` and before `Walk_to_Planning`.
+The sub-task is the **run record**: it identifies the Logic App run and reflects its outcome
+(**Approved** = the run succeeded, **Rejected** = it failed or fell back). It also satisfies
+the *Start implementation* validator, which rejects the move unless the issue **has at least
+one sub-task** (`"Transition is allowed only if the issue has sub-task"`).
+`Create_Run_Subtask` runs after `Override_Clone_Fields` and before `Run_Change` (so before any
+transition/technical change). `Set_Subtask_Key` then captures the created key into the
+`Subtask_Key` variable for the later Approve/Reject transition.
 
-`Create_Approval_Subtask` (`POST /rest/api/2/issue`) creates the sub-task on the clone:
+`Create_Run_Subtask` (`POST /rest/api/2/issue`) creates the sub-task on the clone:
 
 | field | value |
 | --- | --- |
 | `project.key` | `{JiraProjectKey}` |
 | `parent.key` | `{Clone_Key}` |
-| `issuetype.name` | `{SubtaskIssueTypeName}` (default `Approval sub-task`) |
-| `summary` | `Manual review of the automation workflow` |
-| `assignee.name` | `{SubtaskAssigneeName}` — the Jira **login**, default `secops` |
-| `description` | `Manually check the playbook runtime results. Logic App run id: {workflow()['run']['name']}` (embeds the unique Logic App run id for traceability) |
+| `issuetype.name` | `{SubtaskIssueTypeName}` (default `Sub-task`) |
+| `summary` | `TI-handler automation run record` |
+| `assignee.name` | `{SubtaskAssigneeName}` — the Jira **login**, default `sentinelsvc` (the Sentinel service account) |
+| `description` | `Record of the TI-handler automation run. Approved = the run completed successfully; Rejected = the run failed. Logic App run id: {workflow()['run']['name']}` |
+
+**Outcome transition.** At the end of `Run_Change` the sub-task is transitioned by
+target-status name (same name-driven mechanism as the main walk): to `{SubtaskApprovedStatusName}`
+(default `Approved`) on success, or `{SubtaskRejectedStatusName}` (default `Rejected`) on
+failure/fallback. The transition is **best-effort** (`GET transitions → filter by `to.name` →
+POST if found`); a missing transition is a no-op and never fails the run.
 
 Jira REST sets `assignee` by login `name`, **not** by display name or email, so
-`SubtaskAssigneeName` must be the login (`secops` for "LSYH, BUD SECOPS"; the email
-`lsyh.secops@lhsystems.com` is **not** accepted). We assign it **directly** — an earlier
-version looked the login up at runtime via `user/assignable/search?username=`, but the
-server-side filter makes Jira DC run a directory (LDAP) search that exceeds the Logic Apps
-**fixed 120 s HTTP timeout** (it can't be raised on Consumption), so the action always timed
-out. Using the literal login removes the lookup entirely. If the create fails (wrong login,
-missing sub-task type), `Walk_to_Planning` won't run and the whole run fails — by design, so
-the problem surfaces immediately. Reporter defaults to `sentinelsvc`; security level is
-inherited from the parent.
+`SubtaskAssigneeName` must be the login (`sentinelsvc`; an email is **not** accepted). We
+assign it **directly** — an earlier version looked the login up at runtime via
+`user/assignable/search?username=`, but the server-side filter makes Jira DC run a directory
+(LDAP) search that exceeds the Logic Apps **fixed 120 s HTTP timeout** (it can't be raised on
+Consumption), so the action always timed out. Using the literal login removes the lookup
+entirely. If the create fails (wrong login, missing sub-task type), `Run_Change` won't run and
+the whole run fails — by design, so the problem surfaces immediately. Reporter defaults to
+`sentinelsvc`; security level is inherited from the parent. (The main change ticket, by
+contrast, is assigned to **SecOps** (`{MainTicketAssigneeName}`, default `secops`) at the end.)
 
 ---
 
@@ -287,10 +312,11 @@ implementation review→Closed `111`. Standard Change skips the approval stages.
 | 1. Planning | `Planning` | *(none — just `transition.id`)* |
 | 2. Implementation | `Implementation` | `customfield_22500 = plannedStart`, `customfield_22501 = plannedEnd` (run start / run start +10) — re-sent on the transition. ⚠️ Planned start now carries **no** future buffer, so the *Start implementation* validator (which rejects a past Planned start) is no longer accommodated; see the note under *Runtime values*. |
 | 3. Post implementation review | `Post implementation review` | `resolution = { "name": "Successful" }`, `customfield_23600 = plannedStart`, `customfield_23601 = plannedEnd` (Actual start/finish = the **same** run start / +10 values; only settable on this transition screen) |
-| 4. Closed | `Closed` | `resolution = { "name": "Successful" }` |
 
-The close poll stops when the status name contains `Closed` **or** its
-`statusCategory.key` is `done`.
+**The walk STOPS at Post-implementation review.** The previous `Walk_to_Closed` step was
+removed — the change is deliberately left in Post-implementation review, assigned to SecOps,
+for a human to review and close. (Transition id `111` Post-implementation review→Closed is no
+longer used.)
 
 ---
 
@@ -305,16 +331,20 @@ blocks nothing:
   `totalReports >= MinReports` whose ISP is not in `ExcludedISPs` (lower-case
   substring match), then set `Block_IPs` = kept IP list and `CSV_Rows` = the rich kept
   rows.
-- **AbuseIPDB down** (`AbuseIPDB_health_check` Failed/TimedOut/Skipped) →
+- **AbuseIPDB down** (`AbuseIPDB_health_check` **Failed/TimedOut**) →
   `Fallback_Manual_Intervention`: the change is **never advanced to Implementation** and
   **nothing is blocked** — the raw, un-enriched IPs bypass the threshold/ISP filtering and
   could include addresses that must not be blocked. The scope attaches a CSV of **all**
   incident IPs (`Select_Fallback_Rows` → `Build_Fallback_CSV` → `Attach_Fallback_CSV`),
   posts a "manual intervention required" comment (`Comment_Manual_Intervention`), assigns
-  the change to SecOps (`Assign_To_SecOps`, `PUT /assignee` = `SubtaskAssigneeName`), and
-  leaves it in **Planning**. `Terminate_Manual_Intervention` ends the run `Succeeded`.
-  `Write_Blocklist_Blob`, `Build_CSV`, and the Implementation/PIR/Closed walks are Skipped
-  on this path.
+  the change to SecOps (`Assign_To_SecOps`, `PUT /assignee` = `MainTicketAssigneeName`), and
+  leaves it in **Planning**; then `Comment_Source_Incidents` comments the source incidents and
+  `Set_Outcome_Fallback` marks `Run_Outcome='fallback'`. The success handler's else-branch then
+  moves the run-record sub-task to **Rejected** and ends the run `Succeeded`.
+  `Write_Blocklist_Blob`, `Build_CSV`, and the Implementation/PIR walks are Skipped on this
+  path. (`Fallback_Manual_Intervention` runs after `AbuseIPDB_health_check [Failed, TimedOut]`
+  only — **not** `Skipped` — so a genuine Planning-stage failure, which Skips the health check,
+  routes to the failure handler instead of being mislabeled an outage.)
 - **Blocklist blob write is ungated** (`Write_Blocklist_Blob`): GET
   `$web/index.html`, line-level dedupe `Block_IPs` against existing content, and if
   anything is new, PUT the appended blob (managed identity, `text/html`). This is the
@@ -324,7 +354,7 @@ blocks nothing:
   `file=` — the same artifact the old flow built.
 
 There is no longer an "empty result → terminate" branch: even with zero kept IPs the
-change is attached-to and walked to Closed so it never stalls.
+change is attached-to and walked to Post-implementation review so it never stalls.
 
 ---
 
@@ -347,15 +377,18 @@ hiccup never blocks the blocking mission.
 **Activate (still first).** `Activate_Incidents` (Foreach) → `Update_Incident_Active`
 (azuresentinel `PUT /Incidents`, body `{incidentArmId:"https://management.azure.com{id}", status:"Active"}`).
 
-**Close (last, success path only).** After `Walk_to_Closed`, `Close_Source_Incidents`
-(Foreach over the stored ids) → `Update_Incident_Closed` (`PUT /Incidents`, `status: Closed`,
+**Close (last, success path only).** In the success handler (after `Run_Change` succeeds and
+the change reaches Post-implementation review), `Close_Source_Incidents` (Foreach over the
+stored ids) → `Update_Incident_Closed` (`PUT /Incidents`, `status: Closed`,
 `classification.ClassificationAndReason = {IncidentClassificationAndReason}` (default
 `TruePositive - SuspiciousActivity`), `ClassificationReasonText = "Automatically handled in {Clone_Key}"`).
+This runs even though the change itself stops at Post-implementation review (the IPs were
+already blocked, so the threat is actioned).
 
 **Fallback (AbuseIPDB down).** The incidents stay **Active**; `Comment_Source_Incidents`
 (Foreach) → `Comment_Incident` (azuresentinel `POST /Incidents/Comment`) posts a
-manual-intervention note referencing `{Clone_Key}`, then `Terminate_Manual_Intervention` ends
-the run `Succeeded`.
+manual-intervention note referencing `{Clone_Key}`; the run-record sub-task is moved to
+**Rejected** and the run ends `Succeeded`.
 
 The pattern (MI mgmt-REST find + azuresentinel `PUT /Incidents` / `POST /Incidents/Comment`)
 mirrors the org's `trackspacejira_ticket_close.json`. The MI's *Microsoft Sentinel Responder*
@@ -372,8 +405,10 @@ Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
 |---|---|
 | `JiraProjectKey` | `OPSLSY` (used in the find-clone-by-search JQL) |
 | `TemplateIssueKey` | `OPSLSY-75376` (the change cloned each run) |
-| `SubtaskIssueTypeName` | `Approval sub-task` (the required pre-Implementation sub-task) |
-| `SubtaskAssigneeName` | `secops` (Jira **login** the approval sub-task is assigned to — not the email/display name) |
+| `SubtaskIssueTypeName` | `Sub-task` (issue type of the run-record sub-task; also satisfies the Start-implementation "has sub-task" validator) |
+| `SubtaskAssigneeName` | `sentinelsvc` (Jira **login** the run-record sub-task is assigned to — the Sentinel service account) |
+| `SubtaskApprovedStatusName` / `SubtaskRejectedStatusName` | `Approved` / `Rejected` (run-record sub-task outcome statuses) |
+| `MainTicketAssigneeName` | `secops` (Jira **login** the main OPSLSY change is assigned to at Post-implementation review) |
 | `StatusPlanningName` | `Planning` |
 | `StatusImplementationName` | `Implementation` |
 | `StatusPostImplReviewName` | `Post implementation review` |
