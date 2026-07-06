@@ -30,7 +30,7 @@ Sentinel incident trigger (relay incident)
   │
   ├─► Entities - Get IPs          (Sentinel connector; runAfter Find_And_Activate_Incidents S/F/Skipped)
   ├─► Get_Jira_password           (Key Vault, secureData)
-  ├─► Capture_Run_Start + Compute_Run_Times  (plannedStart/End, dateStamp, fileStamp, displayStart/Finish in CET, summary)
+  ├─► Capture_Run_Start + Compute_Run_Times  (actualStart/Finish, dateStamp, fileStamp, displayStart/Finish in CET, summary; Planned start/end are computed fresh with utcNow() at the Override + Implementation writes)
   ├─► Initialize Excluded_IPs / Block_IPs / CSV_Rows / Clone_Key  (root-level variables)
   │
   ├─► Resolve_Template_Id          (GET issue/OPSLSY-75376?fields=id) → Parse_Template_Id
@@ -108,7 +108,7 @@ The transition ids are per-workflow and drift between test and prod, so the walk
 
 Each step is **hardened so a stuck transition fails loudly** rather than POSTing an empty id and limping on: `Guard_Transition_*` `Terminate`s with `TransitionNotFound` (+ current status) if the name filter is empty, and `Confirm_*_Landed` re-fetches the status after the poll and `Terminate`s with `TransitionDidNotLand` if the ticket isn't in the target status.
 
-Per-transition `fields`: Planning sends none; **Implementation re-sends `customfield_22500`/`22501` (Planned start/end) = `plannedStart`/`plannedEnd`**; Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` (actuals) = the same `plannedStart`/`plannedEnd`; Closed sends `resolution=Successful`. All six date fields (description Accurate start/finish, Planned start/end, Actual start/finish) come from one source — `Compute_Run_Times` at **run start (start) / run start + 10 min (finish)** — so they are identical everywhere. ⚠️ Planned start now has **no future buffer**, so the *Start implementation* validator (which rejects a past Planned start) is no longer accommodated (buffer removed by request). (The Affected item and the other change fields are inherited from the clone.)
+Per-transition `fields`: Planning sends none; **Implementation sets `customfield_22500`/`22501` (Planned start/end) = a fresh `utcNow()` / `utcNow()+30`, computed on the Post** — Planned start = current time, so it is the current minute and passes the *Start implementation* non-past-Planned-start validator (a value computed once at run start goes stale during the walk and is rejected, since Jira datetime fields are minute-granular). Post implementation review sends `resolution=Successful` plus `customfield_23600`/`customfield_23601` (Actual start/finish) = `Compute_Run_Times.actualStart`/`actualFinish` (real run start / +10). The description's *Accurate start/finish* also come from `Compute_Run_Times` (`displayStart`/`displayFinish`, real, in CET). (The Affected item and the other change fields are inherited from the clone.)
 
 ## Filter semantics
 
