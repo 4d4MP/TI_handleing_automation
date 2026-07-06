@@ -256,6 +256,23 @@ target-status name (same name-driven mechanism as the main walk): to `{SubtaskSu
 failure/fallback. The transition is **best-effort** (`GET transitions → filter by `to.name` →
 POST if found`); a missing transition is a no-op and never fails the run.
 
+**Resolution on the success transition.** The `Resolved` transition screen carries a
+**Resolution** field, and its configured default is a resolution that is *not* in that
+transition's allowed set — so a bare `POST {transition:{id}}` fails Jira validation with
+`"The selected resolution cannot be chosen during this action."` (the sub-task then stayed
+Open even though the run reported success). The success POST (`Approve_Subtask_Post`) therefore
+**sets a resolution explicitly**, read from the transition metadata already fetched with
+`expand=transitions.fields`: `Approve_Subtask_Resolution_Options` takes
+`fields.resolution.allowedValues`, `Approve_Subtask_Resolution_Match` picks the entry whose
+name matches `{SubtaskSuccessResolutionName}` (default `Successful`), and
+`Approve_Subtask_Transition_Fields` builds `{ "resolution": { "id": … } }` using that match or,
+if the preferred name isn't offered, the **first allowed value** — so the id sent is always one
+the transition accepts. If the transition exposes *no* resolution field (`allowedValues` empty)
+the fields object is `{}`, i.e. the original bare POST, so nothing regresses. The two **On Hold**
+transitions (fallback/failure) send no resolution — `On Hold` is not a resolved state and its
+transition has no resolution field. (The main change ticket's PIR transition already sets
+`resolution = { "name": "Successful" }` the same way — see the walk payload table above.)
+
 Jira REST sets `assignee` by login `name`, **not** by display name or email, so
 `SubtaskAssigneeName` must be the login (`sentinelsvc`; an email is **not** accepted). We
 assign it **directly** — an earlier version looked the login up at runtime via
@@ -403,6 +420,7 @@ Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
 | `SubtaskPriorityName` | `4 - Normal` (Jira priority set by name on the run-record sub-task) |
 | `SubtaskAssigneeName` | `sentinelsvc` (Jira **login** the run-record sub-task is assigned to — the Sentinel service account) |
 | `SubtaskSuccessStatusName` / `SubtaskFailureStatusName` | `Resolved` / `On Hold` (run-record sub-task outcome status/transition) |
+| `SubtaskSuccessResolutionName` | `Successful` (resolution set on the sub-task's `Resolved` transition; matched against that transition's allowed resolutions, falling back to the first allowed value — sent only when the transition has a resolution field) |
 | `MainTicketAssigneeName` | `secops` (Jira **login** the main OPSLSY change is assigned to at Post-implementation review) |
 | `StatusPlanningName` | `Planning` |
 | `StatusImplementationName` | `Implementation` |

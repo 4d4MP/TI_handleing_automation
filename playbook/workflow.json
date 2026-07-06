@@ -2816,6 +2816,32 @@
                                     ]
                                 },
                                 "actions": {
+                                    "Approve_Subtask_Resolution_Options": {
+                                        "type": "Compose",
+                                        "inputs": "@coalesce(first(body('Approve_Subtask_Filter'))?['fields']?['resolution']?['allowedValues'], json('[]'))",
+                                        "runAfter": {}
+                                    },
+                                    "Approve_Subtask_Resolution_Match": {
+                                        "type": "Query",
+                                        "inputs": {
+                                            "from": "@outputs('Approve_Subtask_Resolution_Options')",
+                                            "where": "@equals(toLower(coalesce(item()?['name'], '')), toLower(parameters('SubtaskSuccessResolutionName')))"
+                                        },
+                                        "runAfter": {
+                                            "Approve_Subtask_Resolution_Options": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "Approve_Subtask_Transition_Fields": {
+                                        "type": "Compose",
+                                        "inputs": "@if(greater(length(outputs('Approve_Subtask_Resolution_Options')), 0), setProperty(json('{}'), 'resolution', setProperty(json('{}'), 'id', coalesce(first(body('Approve_Subtask_Resolution_Match'))?['id'], first(outputs('Approve_Subtask_Resolution_Options'))?['id']))), json('{}'))",
+                                        "runAfter": {
+                                            "Approve_Subtask_Resolution_Match": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
                                     "Approve_Subtask_Post": {
                                         "type": "Http",
                                         "inputs": {
@@ -2828,7 +2854,8 @@
                                             "body": {
                                                 "transition": {
                                                     "id": "@{first(body('Approve_Subtask_Filter'))?['id']}"
-                                                }
+                                                },
+                                                "fields": "@outputs('Approve_Subtask_Transition_Fields')"
                                             },
                                             "authentication": {
                                                 "type": "Basic",
@@ -2836,7 +2863,11 @@
                                                 "password": "@body('Get_Jira_password')?['value']"
                                             }
                                         },
-                                        "runAfter": {},
+                                        "runAfter": {
+                                            "Approve_Subtask_Transition_Fields": [
+                                                "Succeeded"
+                                            ]
+                                        },
                                         "runtimeConfiguration": {
                                             "secureData": {
                                                 "properties": [
@@ -3354,6 +3385,10 @@
             },
             "SubtaskFailureStatusName": {
                 "defaultValue": "On Hold",
+                "type": "String"
+            },
+            "SubtaskSuccessResolutionName": {
+                "defaultValue": "Successful",
                 "type": "String"
             },
             "MainTicketAssigneeName": {

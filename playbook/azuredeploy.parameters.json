@@ -59,6 +59,9 @@
         "SubtaskFailureStatusName": {
             "value": "On Hold"
         },
+        "SubtaskSuccessResolutionName": {
+            "value": "Successful"
+        },
         "MainTicketAssigneeName": {
             "value": "secops"
         },
