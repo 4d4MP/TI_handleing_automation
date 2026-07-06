@@ -45,7 +45,10 @@
             "value": "TruePositive - SuspiciousActivity"
         },
         "SubtaskIssueTypeName": {
-            "value": "Sub-task"
+            "value": "Operation sub-task"
+        },
+        "SubtaskPriorityName": {
+            "value": "4 - Normal"
         },
         "SubtaskAssigneeName": {
             "value": "sentinelsvc"

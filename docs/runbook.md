@@ -11,7 +11,7 @@ rolling back a block.
    (Incident A "A network session Source address … matched an IoC."; Incident B
    "#TI Map IP Entity to CommonSecurityLog") and moved to **Active**. If they aren't present,
    the run continues normally (they are optional).
-1. A **run-record sub-task** (type `Sub-task`, assigned to `sentinelsvc`) is created on the
+1. A **run-record sub-task** (type `Operation sub-task`, priority `4 - Normal`, summary "Automatic response", assigned to `sentinelsvc`) is created on the
    change, then an OPSLSY *Technical change* (clone of `OPSLSY-75376`) is created and walked
    to **Planning**.
 2. AbuseIPDB is health-checked. **If it is down, nothing is blocked** — see *AbuseIPDB
@@ -154,7 +154,8 @@ Parameters`) without redeploying ARM:
 | `ExcludedISPs` | `["akamai technologies", "google", "palo alto networks", "the shadowserver foundation", "censys"]` | Lower-case, matched as a **substring** of `toLower(isp)`. |
 | `StatusPlanningName` / `StatusImplementationName` / `StatusPostImplReviewName` / `JiraClosedStatusName` | `Planning` / `Implementation` / `Post implementation review` / `Closed` | Walk target status names, matched case-insensitively as a substring of a transition's target status. |
 | `TemplateIssueKey` | `OPSLSY-75376` | The Technical change cloned each run. Carries the Insight/Assets Affected item and all other change fields. |
-| `SubtaskIssueTypeName` | `Sub-task` | Issue type of the run-record sub-task created on the clone before any technical change (also satisfies the *Start implementation* "has sub-task" validator). |
+| `SubtaskIssueTypeName` | `Operation sub-task` | Issue type of the run-record sub-task created on the clone before any technical change (also satisfies the *Start implementation* "has sub-task" validator). |
+| `SubtaskPriorityName` | `4 - Normal` | Jira priority (by name) set on the run-record sub-task (`priority.name` on `Create_Run_Subtask`). Must be a priority available on that issue type's create screen. |
 | `SubtaskAssigneeName` | `sentinelsvc` | Jira **login** (username) the run-record sub-task is assigned to (the Sentinel service account) — **not** the email or display name. Used directly as `assignee.name` on `Create_Run_Subtask`; an invalid login fails the create and stops the run. |
 | `SubtaskApprovedStatusName` / `SubtaskRejectedStatusName` | `Approved` / `Rejected` | Target status names the run-record sub-task is transitioned to on success / on failure-or-fallback (matched by `to.name`, case-insensitive substring). |
 | `MainTicketAssigneeName` | `secops` | Jira **login** the main OPSLSY change is assigned to (SecOps) at Post-implementation review (success path) and on the AbuseIPDB-down fallback. |

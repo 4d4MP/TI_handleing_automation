@@ -8,7 +8,7 @@ The playbook runs autonomously to **Post-implementation review, then stops for m
 review** — no human approval *gate* mid-run, but the final Close is left to a human. Launched
 by a Sentinel automation rule on a **relay** incident, it **first** finds the two source
 incidents by title and moves them to **Active**, creates a **run-record sub-task** (type
-`Sub-task`, assigned to the `sentinelsvc` service account), then raises one OPSLSY *Technical
+`Operation sub-task`, assigned to the `sentinelsvc` service account), then raises one OPSLSY *Technical
 change* and drives it to **Planning**, then health-checks AbuseIPDB. If AbuseIPDB is healthy
 it walks the change to **Implementation**, enriches the incident IPs, writes the Palo Alto
 blocklist blob, attaches the CSV, walks the change to **Post-implementation review**, assigns
@@ -251,8 +251,9 @@ transition/technical change). `Set_Subtask_Key` then captures the created key in
 | --- | --- |
 | `project.key` | `{JiraProjectKey}` |
 | `parent.key` | `{Clone_Key}` |
-| `issuetype.name` | `{SubtaskIssueTypeName}` (default `Sub-task`) |
-| `summary` | `TI-handler automation run record` |
+| `issuetype.name` | `{SubtaskIssueTypeName}` (default `Operation sub-task`) |
+| `priority.name` | `{SubtaskPriorityName}` (default `4 - Normal`) |
+| `summary` | `Automatic response` |
 | `assignee.name` | `{SubtaskAssigneeName}` — the Jira **login**, default `sentinelsvc` (the Sentinel service account) |
 | `description` | `Record of the TI-handler automation run. Approved = the run completed successfully; Rejected = the run failed. Logic App run id: {workflow()['run']['name']}` |
 
@@ -405,7 +406,8 @@ Tunable workflow parameters (portal-editable without redeploy; ARM defaults in
 |---|---|
 | `JiraProjectKey` | `OPSLSY` (used in the find-clone-by-search JQL) |
 | `TemplateIssueKey` | `OPSLSY-75376` (the change cloned each run) |
-| `SubtaskIssueTypeName` | `Sub-task` (issue type of the run-record sub-task; also satisfies the Start-implementation "has sub-task" validator) |
+| `SubtaskIssueTypeName` | `Operation sub-task` (issue type of the run-record sub-task; also satisfies the Start-implementation "has sub-task" validator) |
+| `SubtaskPriorityName` | `4 - Normal` (Jira priority set by name on the run-record sub-task) |
 | `SubtaskAssigneeName` | `sentinelsvc` (Jira **login** the run-record sub-task is assigned to — the Sentinel service account) |
 | `SubtaskApprovedStatusName` / `SubtaskRejectedStatusName` | `Approved` / `Rejected` (run-record sub-task outcome statuses) |
 | `MainTicketAssigneeName` | `secops` (Jira **login** the main OPSLSY change is assigned to at Post-implementation review) |

@@ -642,7 +642,10 @@
                             "issuetype": {
                                 "name": "@{parameters('SubtaskIssueTypeName')}"
                             },
-                            "summary": "TI-handler automation run record",
+                            "priority": {
+                                "name": "@{parameters('SubtaskPriorityName')}"
+                            },
+                            "summary": "Automatic response",
                             "assignee": {
                                 "name": "@{parameters('SubtaskAssigneeName')}"
                             },
@@ -3268,7 +3271,11 @@
                 "type": "String"
             },
             "SubtaskIssueTypeName": {
-                "defaultValue": "Sub-task",
+                "defaultValue": "Operation sub-task",
+                "type": "String"
+            },
+            "SubtaskPriorityName": {
+                "defaultValue": "4 - Normal",
                 "type": "String"
             },
             "SubtaskAssigneeName": {

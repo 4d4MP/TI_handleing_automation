@@ -113,9 +113,16 @@
         },
         "SubtaskIssueTypeName": {
             "type": "string",
-            "defaultValue": "Sub-task",
+            "defaultValue": "Operation sub-task",
             "metadata": {
                 "description": "Issue-type name for the run-record sub-task created on the clone before any technical change (also satisfies the Start-implementation \"has sub-task\" validator)."
+            }
+        },
+        "SubtaskPriorityName": {
+            "type": "string",
+            "defaultValue": "4 - Normal",
+            "metadata": {
+                "description": "Jira priority (by name) set on the run-record Operation sub-task."
             }
         },
         "SubtaskAssigneeName": {
@@ -312,6 +319,10 @@
                         "SubtaskIssueTypeName": {
                             "type": "String",
                             "defaultValue": "[parameters('SubtaskIssueTypeName')]"
+                        },
+                        "SubtaskPriorityName": {
+                            "type": "String",
+                            "defaultValue": "[parameters('SubtaskPriorityName')]"
                         },
                         "SubtaskAssigneeName": {
                             "type": "String",
@@ -1027,7 +1038,10 @@
                                         "issuetype": {
                                             "name": "@{parameters('SubtaskIssueTypeName')}"
                                         },
-                                        "summary": "TI-handler automation run record",
+                                        "priority": {
+                                            "name": "@{parameters('SubtaskPriorityName')}"
+                                        },
+                                        "summary": "Automatic response",
                                         "assignee": {
                                             "name": "@{parameters('SubtaskAssigneeName')}"
                                         },

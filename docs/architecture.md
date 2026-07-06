@@ -5,7 +5,7 @@
 When a Microsoft Sentinel automation rule launches this playbook on a **relay** incident, it **autonomously**:
 
 0. **First:** finds the two source incidents by title — Incident A ("A network session Source address … matched an IoC.") and Incident B ("#TI Map IP Entity to CommonSecurityLog") — and moves them to **Active**. If they are absent the run proceeds normally.
-1. Pulls IP entities from the (relay) incident, and creates a **run-record sub-task** (type `Sub-task`, assigned to the `sentinelsvc` service account) on the change — before any technical change.
+1. Pulls IP entities from the (relay) incident, and creates a **run-record sub-task** (type `Operation sub-task`, priority `4 - Normal`, summary "Automatic response", assigned to the `sentinelsvc` service account) on the change — before any technical change.
 2. Raises an OPSLSY *Technical change* (a logical clone of the template `OPSLSY-75376`) and walks it to **Planning**.
 3. Health-checks AbuseIPDB. **If it is down, nothing is blocked**: a CSV of all incident IPs is attached, a "manual intervention required" comment is posted, the change is assigned to SecOps and **left in Planning**, the source incidents are commented (left Active), the run-record sub-task is moved to **Rejected**, and the run ends Succeeded. Otherwise the change is walked to **Implementation** and enrichment proceeds.
 4. Enriches each IP against AbuseIPDB and filters out IPs below the report threshold or owned by an ignored ISP.
@@ -39,7 +39,7 @@ Sentinel incident trigger (relay incident)
   ├─► Find_Clone_Key (Until)       (poll GET /search jql=reporter+created>=-10m → Set_Clone_Key at loop top-level; exit on key presence)
   ├─► Verify_Clone_Found           (Clone_Key empty → Terminate CloneNotFound)
   ├─► Override_Clone_Fields        (PUT issue/{Clone_Key}: description + planned start/end)
-  ├─► Create_Run_Subtask           (POST /issue: run-record sub-task, type={SubtaskIssueTypeName}=Sub-task, assignee={SubtaskAssigneeName}=sentinelsvc)
+  ├─► Create_Run_Subtask           (POST /issue: run-record sub-task, type={SubtaskIssueTypeName}=Operation sub-task, priority={SubtaskPriorityName}=4 - Normal, summary="Automatic response", assignee={SubtaskAssigneeName}=sentinelsvc)
   ├─► Set_Subtask_Key              (SetVariable Subtask_Key = body(Create_Run_Subtask).key)
   │
   ├─► Run_Change (Scope; runAfter Set_Subtask_Key) — any unhandled failure inside → scope Failed → On_Run_Failed
