@@ -649,7 +649,7 @@
                             "assignee": {
                                 "name": "@{parameters('SubtaskAssigneeName')}"
                             },
-                            "description": "Record of the TI-handler automation run. Approved = the run completed successfully; Rejected = the run failed. Logic App run id: @{workflow()?['run']?['name']}"
+                            "description": "Record of the TI-handler automation run. Resolved = the run completed successfully; On Hold = the run failed or needs manual intervention. Logic App run id: @{workflow()?['run']?['name']}"
                         }
                     },
                     "authentication": {
@@ -2799,7 +2799,7 @@
                                 "type": "Query",
                                 "inputs": {
                                     "from": "@coalesce(body('Approve_Subtask_Parse')?['transitions'], json('[]'))",
-                                    "where": "@contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskApprovedStatusName')))"
+                                    "where": "@or(contains(toLower(coalesce(item()?['name'], '')), toLower(parameters('SubtaskSuccessStatusName'))), contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskSuccessStatusName'))))"
                                 },
                                 "runAfter": {
                                     "Approve_Subtask_Parse": [
@@ -2983,7 +2983,7 @@
                                     "type": "Query",
                                     "inputs": {
                                         "from": "@coalesce(body('Reject_Subtask_Fallback_Parse')?['transitions'], json('[]'))",
-                                        "where": "@contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskRejectedStatusName')))"
+                                        "where": "@or(contains(toLower(coalesce(item()?['name'], '')), toLower(parameters('SubtaskFailureStatusName'))), contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskFailureStatusName'))))"
                                     },
                                     "runAfter": {
                                         "Reject_Subtask_Fallback_Parse": [
@@ -3142,7 +3142,7 @@
                                 "type": "Query",
                                 "inputs": {
                                     "from": "@coalesce(body('Reject_Subtask_Failure_Parse')?['transitions'], json('[]'))",
-                                    "where": "@contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskRejectedStatusName')))"
+                                    "where": "@or(contains(toLower(coalesce(item()?['name'], '')), toLower(parameters('SubtaskFailureStatusName'))), contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskFailureStatusName'))))"
                                 },
                                 "runAfter": {
                                     "Reject_Subtask_Failure_Parse": [
@@ -3348,12 +3348,12 @@
                 "defaultValue": "TruePositive - SuspiciousActivity",
                 "type": "String"
             },
-            "SubtaskApprovedStatusName": {
-                "defaultValue": "Approved",
+            "SubtaskSuccessStatusName": {
+                "defaultValue": "Resolved",
                 "type": "String"
             },
-            "SubtaskRejectedStatusName": {
-                "defaultValue": "Rejected",
+            "SubtaskFailureStatusName": {
+                "defaultValue": "On Hold",
                 "type": "String"
             },
             "MainTicketAssigneeName": {

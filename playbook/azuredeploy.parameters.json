@@ -53,11 +53,11 @@
         "SubtaskAssigneeName": {
             "value": "sentinelsvc"
         },
-        "SubtaskApprovedStatusName": {
-            "value": "Approved"
+        "SubtaskSuccessStatusName": {
+            "value": "Resolved"
         },
-        "SubtaskRejectedStatusName": {
-            "value": "Rejected"
+        "SubtaskFailureStatusName": {
+            "value": "On Hold"
         },
         "MainTicketAssigneeName": {
             "value": "secops"

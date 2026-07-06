@@ -22,12 +22,12 @@ rolling back a block.
 4. The CSV of blocked IPs is attached to the change; the change is walked to
    **Post-implementation review**.
 5. **On success the run STOPS at Post-implementation review:** the change is assigned to
-   **SecOps** (`MainTicketAssigneeName`), the run-record sub-task is moved to **Approved**,
+   **SecOps** (`MainTicketAssigneeName`), the run-record sub-task is moved to **Resolved**,
    and the two source incidents are moved to **Closed / TruePositive** (comment
    `Automatically handled in <OPSLSY change key>`). The change is **left in Post-implementation
    review** for a human to review and close — the automation does **not** close it.
 6. **On any failure** after the sub-task is created, the run-record sub-task is moved to
-   **Rejected** and the run ends **Failed**.
+   **On Hold** and the run ends **Failed**.
 
 ### AbuseIPDB down (manual-intervention fallback)
 
@@ -35,7 +35,7 @@ When the health check fails the run does **not** block anything (the raw, un-enr
 could include addresses that must never be blocked). Instead it attaches a CSV of **all**
 incident IPs, posts a comment that AbuseIPDB failed and manual intervention is required,
 assigns the change to **SecOps** (`MainTicketAssigneeName`), and **leaves it in Planning**. The
-blocklist blob is untouched, the run-record sub-task is moved to **Rejected**, and the Logic
+blocklist blob is untouched, the run-record sub-task is moved to **On Hold**, and the Logic
 App run still ends **Succeeded**. A SecOps engineer must review the attached IPs and apply/close
 the change by hand. On this path the two source Sentinel incidents are **left Active** and a
 comment is posted on each noting AbuseIPDB was unavailable, nothing was blocked, and manual
@@ -135,8 +135,8 @@ re-runs idempotent. To avoid it entirely, switch `Update_blob` to use the `ETag`
 | `Find_Clone_Key` loops to its limit (~11 min) even though `Set_Clone_Key` shows the correct value | `Set_Clone_Key` was nested inside an `If` (`Set_Clone_Key_If_Found`); Logic Apps doesn't reliably surface a variable mutated in a nested scope to the enclosing `Until` exit check, so the loop never saw the value | Fixed: `Set_Clone_Key` now runs at the **top level of the loop body** (after `Parse_Search`), assigning `coalesce(issues[0].key, '')` every iteration, so `@not(empty(variables('Clone_Key')))` trips on the first poll that finds the clone. Runs are immutable — redeploy, cancel any stuck run, start a fresh one. |
 | Implementation transition fails: `"Transition is allowed only if the issue has sub-task"` | The *Start implementation* validator requires a sub-task and none exists | Handled by `Create_Run_Subtask` (runs before `Run_Change`). If it recurs, check `Create_Run_Subtask` succeeded — most often `SubtaskIssueTypeName` isn't a valid sub-task type in the project, or `SubtaskAssigneeName` isn't a real login. |
 | `Create_Run_Subtask` fails: `assignee: User '…' does not exist` | `SubtaskAssigneeName` isn't a valid Jira login | Jira sets `assignee` by login `name`, not email/display name. Set `SubtaskAssigneeName` to the login (e.g. `sentinelsvc`, found at `/secure/ViewProfile.jspa?name=sentinelsvc`), not an email. |
-| Run-record sub-task never moves to Approved/Rejected | The Sub-task workflow has no transition whose target status name matches `SubtaskApprovedStatusName` / `SubtaskRejectedStatusName` | The Approve/Reject step is best-effort (a missing transition is a silent no-op — it never fails the run). Confirm the Sub-task workflow exposes `Approved` / `Rejected` statuses (or set the params to the actual status names). |
-| Run reports Succeeded but nothing was blocked | AbuseIPDB-down fallback (sub-task Rejected), OR the change didn't reach Implementation | Open the run-record sub-task (Rejected = fallback/failure) and the change status. On the fallback path the run intentionally ends Succeeded. |
+| Run-record sub-task never moves to Resolved/On Hold | The Operation sub-task workflow has no transition whose **name** or target status matches `SubtaskSuccessStatusName` / `SubtaskFailureStatusName` from its current state | The step is best-effort (a missing transition is a silent no-op — it never fails the run). Confirm the Operation sub-task workflow reaches `Resolved` (success) / `On Hold` (failure) directly from `Open` (or set the params to the actual names). |
+| Run reports Succeeded but nothing was blocked | AbuseIPDB-down fallback (sub-task On Hold), OR the change didn't reach Implementation | Open the run-record sub-task (On Hold = fallback/failure) and the change status. On the fallback path the run intentionally ends Succeeded. |
 | `Find_Assignee_Account` (older versions) times out (~2 min) | A runtime `user/assignable/search?username=` lookup made Jira DC run a directory (LDAP) search exceeding the Logic Apps **fixed 120 s HTTP timeout** (not raisable on Consumption) | Removed: the assignee is now set directly from the `SubtaskAssigneeName` login, so there is no lookup to time out. |
 | Run fails `TransitionNotFound` | No transition to the target status was offered from the ticket's current status (board/workflow changed, or a prior hop didn't land) | The error message names the target and the current status. Check the change's available transitions for that status. |
 | Run fails `TransitionDidNotLand` | The transition POST didn't move the ticket within the poll window (validator rejected it, or it genuinely failed) | The message includes the current status and the POST status code. A known cause is *"Planned start cannot be a past date"* on Start implementation. ⚠️ Date fields are now computed as **run start** (start) / **run start +10 min** (finish) with **no future buffer** (a deliberate change), so if the prod *Start implementation* transition enforces the non-past-Planned-start validator this will recur once the walk pushes run start into the past. Fix: re-introduce a forward offset on `plannedStart`/`plannedEnd` in `Compute_Run_Times` (e.g. `addMinutes(start, 20)`). |
@@ -157,5 +157,5 @@ Parameters`) without redeploying ARM:
 | `SubtaskIssueTypeName` | `Operation sub-task` | Issue type of the run-record sub-task created on the clone before any technical change (also satisfies the *Start implementation* "has sub-task" validator). |
 | `SubtaskPriorityName` | `4 - Normal` | Jira priority (by name) set on the run-record sub-task (`priority.name` on `Create_Run_Subtask`). Must be a priority available on that issue type's create screen. |
 | `SubtaskAssigneeName` | `sentinelsvc` | Jira **login** (username) the run-record sub-task is assigned to (the Sentinel service account) — **not** the email or display name. Used directly as `assignee.name` on `Create_Run_Subtask`; an invalid login fails the create and stops the run. |
-| `SubtaskApprovedStatusName` / `SubtaskRejectedStatusName` | `Approved` / `Rejected` | Target status names the run-record sub-task is transitioned to on success / on failure-or-fallback (matched by `to.name`, case-insensitive substring). |
+| `SubtaskSuccessStatusName` / `SubtaskFailureStatusName` | `Resolved` / `On Hold` | Target status/transition the run-record sub-task moves to on success / on failure-or-fallback (matched against transition **name** OR target status `to.name`, case-insensitive substring). |
 | `MainTicketAssigneeName` | `secops` | Jira **login** the main OPSLSY change is assigned to (SecOps) at Post-implementation review (success path) and on the AbuseIPDB-down fallback. |

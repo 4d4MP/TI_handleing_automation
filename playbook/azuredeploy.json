@@ -132,18 +132,18 @@
                 "description": "Jira login the run-record sub-task is assigned to (the Sentinel service account)."
             }
         },
-        "SubtaskApprovedStatusName": {
+        "SubtaskSuccessStatusName": {
             "type": "string",
-            "defaultValue": "Approved",
+            "defaultValue": "Resolved",
             "metadata": {
-                "description": "Target status the run-record sub-task moves to when the automation run succeeds."
+                "description": "Target status/transition the run-record sub-task moves to on a successful run (matched against transition name OR target status)."
             }
         },
-        "SubtaskRejectedStatusName": {
+        "SubtaskFailureStatusName": {
             "type": "string",
-            "defaultValue": "Rejected",
+            "defaultValue": "On Hold",
             "metadata": {
-                "description": "Target status the run-record sub-task moves to when the automation run fails or falls back."
+                "description": "Target status/transition the run-record sub-task moves to on a failed or fallback run (matched against transition name OR target status)."
             }
         },
         "MainTicketAssigneeName": {
@@ -388,13 +388,13 @@
                             "type": "String",
                             "defaultValue": "[parameters('IncidentClassificationAndReason')]"
                         },
-                        "SubtaskApprovedStatusName": {
+                        "SubtaskSuccessStatusName": {
                             "type": "String",
-                            "defaultValue": "[parameters('SubtaskApprovedStatusName')]"
+                            "defaultValue": "[parameters('SubtaskSuccessStatusName')]"
                         },
-                        "SubtaskRejectedStatusName": {
+                        "SubtaskFailureStatusName": {
                             "type": "String",
-                            "defaultValue": "[parameters('SubtaskRejectedStatusName')]"
+                            "defaultValue": "[parameters('SubtaskFailureStatusName')]"
                         },
                         "MainTicketAssigneeName": {
                             "type": "String",
@@ -1045,7 +1045,7 @@
                                         "assignee": {
                                             "name": "@{parameters('SubtaskAssigneeName')}"
                                         },
-                                        "description": "Record of the TI-handler automation run. Approved = the run completed successfully; Rejected = the run failed. Logic App run id: @{workflow()?['run']?['name']}"
+                                        "description": "Record of the TI-handler automation run. Resolved = the run completed successfully; On Hold = the run failed or needs manual intervention. Logic App run id: @{workflow()?['run']?['name']}"
                                     }
                                 },
                                 "authentication": {
@@ -3195,7 +3195,7 @@
                                             "type": "Query",
                                             "inputs": {
                                                 "from": "@coalesce(body('Approve_Subtask_Parse')?['transitions'], json('[]'))",
-                                                "where": "@contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskApprovedStatusName')))"
+                                                "where": "@or(contains(toLower(coalesce(item()?['name'], '')), toLower(parameters('SubtaskSuccessStatusName'))), contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskSuccessStatusName'))))"
                                             },
                                             "runAfter": {
                                                 "Approve_Subtask_Parse": [
@@ -3379,7 +3379,7 @@
                                                 "type": "Query",
                                                 "inputs": {
                                                     "from": "@coalesce(body('Reject_Subtask_Fallback_Parse')?['transitions'], json('[]'))",
-                                                    "where": "@contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskRejectedStatusName')))"
+                                                    "where": "@or(contains(toLower(coalesce(item()?['name'], '')), toLower(parameters('SubtaskFailureStatusName'))), contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskFailureStatusName'))))"
                                                 },
                                                 "runAfter": {
                                                     "Reject_Subtask_Fallback_Parse": [
@@ -3538,7 +3538,7 @@
                                             "type": "Query",
                                             "inputs": {
                                                 "from": "@coalesce(body('Reject_Subtask_Failure_Parse')?['transitions'], json('[]'))",
-                                                "where": "@contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskRejectedStatusName')))"
+                                                "where": "@or(contains(toLower(coalesce(item()?['name'], '')), toLower(parameters('SubtaskFailureStatusName'))), contains(toLower(coalesce(item()?['to']?['name'], '')), toLower(parameters('SubtaskFailureStatusName'))))"
                                             },
                                             "runAfter": {
                                                 "Reject_Subtask_Failure_Parse": [
