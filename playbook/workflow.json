@@ -2833,11 +2833,29 @@
                                             ]
                                         }
                                     },
-                                    "Approve_Subtask_Transition_Fields": {
+                                    "Approve_Subtask_Transition_Meta": {
                                         "type": "Compose",
-                                        "inputs": "@if(greater(length(outputs('Approve_Subtask_Resolution_Options')), 0), setProperty(json('{}'), 'resolution', setProperty(json('{}'), 'id', coalesce(first(body('Approve_Subtask_Resolution_Match'))?['id'], first(outputs('Approve_Subtask_Resolution_Options'))?['id']))), json('{}'))",
+                                        "inputs": "@coalesce(first(body('Approve_Subtask_Filter'))?['fields'], json('{}'))",
                                         "runAfter": {
                                             "Approve_Subtask_Resolution_Match": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "Approve_Subtask_Planned_Fields": {
+                                        "type": "Compose",
+                                        "inputs": "@if(contains(outputs('Approve_Subtask_Transition_Meta'), 'customfield_22500'), setProperty(setProperty(json('{}'), 'customfield_22500', concat(formatDateTime(utcNow(), 'yyyy-MM-dd'), 'T', formatDateTime(utcNow(), 'HH:mm:ss'), '.000+0000')), 'customfield_22501', concat(formatDateTime(addMinutes(utcNow(), 30), 'yyyy-MM-dd'), 'T', formatDateTime(addMinutes(utcNow(), 30), 'HH:mm:ss'), '.000+0000')), json('{}'))",
+                                        "runAfter": {
+                                            "Approve_Subtask_Transition_Meta": [
+                                                "Succeeded"
+                                            ]
+                                        }
+                                    },
+                                    "Approve_Subtask_Transition_Fields": {
+                                        "type": "Compose",
+                                        "inputs": "@if(greater(length(outputs('Approve_Subtask_Resolution_Options')), 0), setProperty(outputs('Approve_Subtask_Planned_Fields'), 'resolution', setProperty(json('{}'), 'id', coalesce(first(body('Approve_Subtask_Resolution_Match'))?['id'], first(outputs('Approve_Subtask_Resolution_Options'))?['id']))), outputs('Approve_Subtask_Planned_Fields'))",
+                                        "runAfter": {
+                                            "Approve_Subtask_Planned_Fields": [
                                                 "Succeeded"
                                             ]
                                         }
