@@ -6,17 +6,18 @@
 
 The playbook runs autonomously to **Post-implementation review, then stops for manual
 review** — no human approval *gate* mid-run, but the final Close is left to a human. Launched
-by a Sentinel automation rule on a **relay** incident, it **first** finds the two source
-incidents by title and moves them to **Active**, creates a **run-record sub-task** (type
+by a Sentinel automation rule on a **relay** incident, it **first** moves that relay incident
+(titled `AUTO_TI_correlated_IPs`) **and** the two source incidents it finds by title to
+**Active**, creates a **run-record sub-task** (type
 `Operation sub-task`, assigned to the `sentinelsvc` service account), then raises one OPSLSY *Technical
 change* and drives it to **Planning**, then health-checks AbuseIPDB. If AbuseIPDB is healthy
 it walks the change to **Implementation**, enriches the incident IPs, writes the Palo Alto
 blocklist blob, attaches the CSV, walks the change to **Post-implementation review**, assigns
-the change to **SecOps**, moves the run-record sub-task to **Resolved**, closes the two source
-incidents as **TruePositive**, and **stops** — leaving the change in Post-implementation review
+the change to **SecOps**, moves the run-record sub-task to **Resolved**, closes the relay and
+the two source incidents as **TruePositive**, and **stops** — leaving the change in Post-implementation review
 for a human to close. If AbuseIPDB is **down** it blocks nothing: it attaches a CSV of all
 incident IPs, comments that manual intervention is required, assigns the change to SecOps,
-leaves it in **Planning**, comments on the source incidents (left **Active**), and moves the
+leaves it in **Planning**, comments on the relay and source incidents (left **Active**), and moves the
 run-record sub-task to **On Hold**. If the run **fails** at any point after the sub-task is
 created, the sub-task is moved to **On Hold** and the run ends Failed (see *AbuseIPDB
 outage*, *Run-record sub-task*, and *Source incident lifecycle* below).
@@ -26,8 +27,8 @@ outage*, *Run-record sub-task*, and *Source incident lifecycle* below).
 > the blocklist. Per a management decision that approval gate was removed and the
 > ticket of record moved to an OPSLSY Technical change. All CLOPSSEC actions, the
 > `Wait_For_Approval` Until loop, and the approve/not-approved switch are gone. (The
-> playbook again writes to Sentinel, but only to the two *source* incidents it owns —
-> status + classification + a comment — never to the relay incident that triggers it.)
+> playbook again writes to Sentinel — to the two *source* incidents it owns **and** to the
+> relay incident that triggers it — status + classification + a comment.)
 
 ---
 
@@ -49,7 +50,7 @@ trigger
             └─ down → attach CSV of ALL IPs + comment + assign SecOps (LEFT in Planning)
                       → comment source incidents → Run_Outcome='fallback'
   → On success (Run_Change Succeeded, Run_Outcome='success'):
-       assign main change → SecOps ; sub-task → Resolved ; close source incidents (TruePositive)
+       assign main change → SecOps ; sub-task → Resolved ; close relay + source incidents (TruePositive)
        → Terminate Succeeded   (STOP — change LEFT in Post-implementation review for manual close)
   → On fallback (Run_Outcome='fallback'): sub-task → On Hold → Terminate Succeeded
   → On failure (Run_Change Failed): sub-task → On Hold → Terminate Failed (captured message)
@@ -360,7 +361,7 @@ blocks nothing:
   incident IPs (`Select_Fallback_Rows` → `Build_Fallback_CSV` → `Attach_Fallback_CSV`),
   posts a "manual intervention required" comment (`Comment_Manual_Intervention`), assigns
   the change to SecOps (`Assign_To_SecOps`, `PUT /assignee` = `MainTicketAssigneeName`), and
-  leaves it in **Planning**; then `Comment_Source_Incidents` comments the source incidents and
+  leaves it in **Planning**; then `Comment_Source_Incidents` comments the relay and source incidents and
   `Set_Outcome_Fallback` marks `Run_Outcome='fallback'`. The success handler's else-branch then
   moves the run-record sub-task to **On Hold** and ends the run `Succeeded`.
   `Write_Blocklist_Blob`, `Build_CSV`, and the Implementation/PIR walks are Skipped on this
@@ -383,38 +384,48 @@ change is attached-to and walked to Post-implementation review so it never stall
 ## Source incident lifecycle
 
 The playbook is launched by an automation rule on a **relay** incident (whose
-`relatedEntities` drive the IP extraction). It additionally owns two *source* incidents:
+`relatedEntities` drive the IP extraction). It manages **three** incidents — that relay
+(trigger) incident itself **and** two *source* incidents it locates by title:
 
+- **Relay incident** — the incident that fired the automation rule (titled `AUTO_TI_correlated_IPs`). Its ARM id is taken **straight from the trigger** (`@triggerBody()?['object']?['id']`), so it is targeted exactly — no title lookup, and no risk of sweeping up a stale earlier correlation incident that happens to share the title.
 - **Incident A** — title starts with `IncidentTitleIoCPrefix` ("A network session Source address") and ends with `IncidentTitleIoCSuffix` ("matched an IoC."); the middle segment is the offending IP.
 - **Incident B** — title equals `IncidentTitleMap` ("#TI Map IP Entity to CommonSecurityLog").
 
 **Find (first action, before `Entities - Get IPs`).** `List_Sentinel_Incidents`
 (`GET https://management.azure.com{LogAnalyticsResourceID}/providers/Microsoft.SecurityInsights/incidents?api-version={IncidentApiVersion}&$filter=(properties/status ne 'Closed')&$orderby=properties/createdTimeUtc desc`,
-managed identity) lists open incidents; `Filter_Target_Incidents` keeps the two by title;
-`Set_Incident_Arm_Ids` stores their ARM ids in the `Incident_Arm_Ids` variable. If neither is
-present the array is empty and every incident step below is a graceful no-op —
-`Entities - Get IPs` runs after this scope on `Succeeded`/`Failed`/`Skipped`, so a Sentinel
-hiccup never blocks the blocking mission.
+managed identity) lists open incidents; `Filter_Target_Incidents` keeps the two source
+incidents by title; `Set_Incident_Arm_Ids` then **unions the relay incident's ARM id — taken
+straight from the trigger (`@triggerBody()?['object']?['id']`) — with those source ARM ids**
+and stores the result in the `Incident_Arm_Ids` variable. The relay is therefore managed on
+every run independently of the title search; if neither source is present the array still
+holds the relay id, and if the whole lookup fails every incident step below is a graceful
+no-op — `Entities - Get IPs` runs after this scope on `Succeeded`/`Failed`/`Skipped`, so a
+Sentinel hiccup never blocks the blocking mission.
 
-**Activate (still first).** `Activate_Incidents` (Foreach) → `Update_Incident_Active`
+**Activate (still first).** `Activate_Incidents` (Foreach over `Incident_Arm_Ids` — the relay
+**and** both source incidents) → `Update_Incident_Active`
 (azuresentinel `PUT /Incidents`, body `{incidentArmId:"https://management.azure.com{id}", status:"Active"}`).
 
 **Close (last, success path only).** In the success handler (after `Run_Change` succeeds and
 the change reaches Post-implementation review), `Close_Source_Incidents` (Foreach over the
-stored ids) → `Update_Incident_Closed` (`PUT /Incidents`, `status: Closed`,
+stored ids — the relay incident **and** both source incidents) → `Update_Incident_Closed`
+(`PUT /Incidents`, `status: Closed`,
 `classification.ClassificationAndReason = {IncidentClassificationAndReason}` (default
 `TruePositive - SuspiciousActivity`), `ClassificationReasonText = "Automatically handled in {Clone_Key}"`).
 This runs even though the change itself stops at Post-implementation review (the IPs were
 already blocked, so the threat is actioned).
 
 **Fallback (AbuseIPDB down).** The incidents stay **Active**; `Comment_Source_Incidents`
-(Foreach) → `Comment_Incident` (azuresentinel `POST /Incidents/Comment`) posts a
+(Foreach over `Incident_Arm_Ids` — the relay **and** both source incidents) → `Comment_Incident`
+(azuresentinel `POST /Incidents/Comment`) posts a
 manual-intervention note referencing `{Clone_Key}`; the run-record sub-task is moved to
 **On Hold** and the run ends `Succeeded`.
 
 The pattern (MI mgmt-REST find + azuresentinel `PUT /Incidents` / `POST /Incidents/Comment`)
 mirrors the org's `trackspacejira_ticket_close.json`. The MI's *Microsoft Sentinel Responder*
-role covers list/read/update/comment — no new RBAC. The **relay** incident is never modified.
+role covers list/read/update/comment — no new RBAC. The **relay** incident is now managed
+alongside the two source incidents — **Active** at start, **Closed / TruePositive** at end
+(comment `Automatically handled in {Clone_Key}`); its id comes from the trigger, not a title search.
 
 ---
 

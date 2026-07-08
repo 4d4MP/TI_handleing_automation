@@ -4,17 +4,17 @@
 
 When a Microsoft Sentinel automation rule launches this playbook on a **relay** incident, it **autonomously**:
 
-0. **First:** finds the two source incidents by title — Incident A ("A network session Source address … matched an IoC.") and Incident B ("#TI Map IP Entity to CommonSecurityLog") — and moves them to **Active**. If they are absent the run proceeds normally.
+0. **First:** activates the triggering (relay) incident (titled `AUTO_TI_correlated_IPs`, id taken straight from the trigger) **and** the two source incidents it finds by title — Incident A ("A network session Source address … matched an IoC.") and Incident B ("#TI Map IP Entity to CommonSecurityLog") — moving them all to **Active**. If the sources are absent the relay is still activated and the run proceeds normally.
 1. Pulls IP entities from the (relay) incident, and creates a **run-record sub-task** (type `Operation sub-task`, priority `4 - Normal`, summary "Automatic response", assigned to the `sentinelsvc` service account) on the change — before any technical change.
 2. Raises an OPSLSY *Technical change* (a logical clone of the template `OPSLSY-75376`) and walks it to **Planning**.
 3. Health-checks AbuseIPDB. **If it is down, nothing is blocked**: a CSV of all incident IPs is attached, a "manual intervention required" comment is posted, the change is assigned to SecOps and **left in Planning**, the source incidents are commented (left Active), the run-record sub-task is moved to **On Hold**, and the run ends Succeeded. Otherwise the change is walked to **Implementation** and enrichment proceeds.
 4. Enriches each IP against AbuseIPDB and filters out IPs below the report threshold or owned by an ignored ISP.
 5. Appends the surviving IPs (one per line, deduped) to a static-site blocklist blob — **ungated**; there is no approval.
 6. Attaches the CSV report to the change and walks it to **Post-implementation review**.
-7. **Stops at Post-implementation review:** assigns the change to **SecOps**, moves the run-record sub-task to **Resolved**, closes the two source incidents as **Closed / TruePositive** (comment `Automatically handled in <OPSLSY change key>`), and terminates Succeeded — the change is **left in Post-implementation review** for a human to review and close (it is **not** auto-closed).
+7. **Stops at Post-implementation review:** assigns the change to **SecOps**, moves the run-record sub-task to **Resolved**, closes the relay incident **and** the two source incidents as **Closed / TruePositive** (comment `Automatically handled in <OPSLSY change key>`), and terminates Succeeded — the change is **left in Post-implementation review** for a human to review and close (it is **not** auto-closed).
 8. **On any failure** after the sub-task is created, the run-record sub-task is moved to **On Hold** and the run ends Failed.
 
-The whole flow runs in a single Azure Logic App (Consumption). There is no Python — the filter loop lives entirely in the workflow. There is **no human approval gate** and **no CLOPSSEC ticket** (both removed), but the final Close is a **manual** step (the run stops at Post-implementation review). The change lifecycle is wrapped in a `Run_Change` scope whose Succeeded/Failed status (plus a `Run_Outcome` marker) drives the outcome handlers. The playbook manages the two *source* incidents' status/classification and posts comments to them; it does not touch the *relay* incident that fires the automation rule.
+The whole flow runs in a single Azure Logic App (Consumption). There is no Python — the filter loop lives entirely in the workflow. There is **no human approval gate** and **no CLOPSSEC ticket** (both removed), but the final Close is a **manual** step (the run stops at Post-implementation review). The change lifecycle is wrapped in a `Run_Change` scope whose Succeeded/Failed status (plus a `Run_Outcome` marker) drives the outcome handlers. The playbook manages the *relay* incident that fires the automation rule **and** the two *source* incidents — their status/classification, plus comments on the fallback path.
 
 ## Sequence
 
@@ -25,8 +25,8 @@ Sentinel incident trigger (relay incident)
   ├─► Find_And_Activate_Incidents  (runs FIRST; Entities waits on it)
   │       ├─ List_Sentinel_Incidents  (Http GET mgmt REST, MI; $filter status ne 'Closed', newest first)
   │       ├─ Filter_Target_Incidents  (title A prefix+suffix OR title B exact)
-  │       ├─ Build_Incident_Ids / Set_Incident_Arm_Ids  (store matched ARM ids)
-  │       └─ Activate_Incidents (Foreach) → Update_Incident_Active (put /Incidents, status Active)
+  │       ├─ Build_Incident_Ids / Set_Incident_Arm_Ids  (union relay id from trigger + matched source ARM ids)
+  │       └─ Activate_Incidents (Foreach: relay + sources) → Update_Incident_Active (put /Incidents, status Active)
   │
   ├─► Entities - Get IPs          (Sentinel connector; runAfter Find_And_Activate_Incidents S/F/Skipped)
   ├─► Get_Jira_password           (Key Vault, secureData)
@@ -57,7 +57,7 @@ Sentinel incident trigger (relay incident)
   │
   ├─► On_Run_Succeeded (If Run_Outcome=='success'), runAfter Run_Change [Succeeded]
   │       ├─ true:  Assign_Main_To_SecOps (PUT /assignee={MainTicketAssigneeName}) → Approve_Subtask (→{SubtaskSuccessStatusName})
-  │       │          → Close_Source_Incidents (put /Incidents, Closed + TruePositive) → Terminate Succeeded  (STOP at PIR)
+  │       │          → Close_Source_Incidents (relay + sources; put /Incidents, Closed + TruePositive) → Terminate Succeeded  (STOP at PIR)
   │       └─ else:  Reject_Subtask (→{SubtaskFailureStatusName}) → Terminate Succeeded   (fallback)
   └─► On_Run_Failed (Scope), runAfter Run_Change [Failed]
           Reject_Subtask (→{SubtaskFailureStatusName})
@@ -78,7 +78,7 @@ hard-terminating the run) and route to `On_Run_Failed`, which Rejects the run-re
 | `Microsoft.Web/connections/abuseipdbapi-1` | API connection — **OMS-backed, referenced not created** | Backs the AbuseIPDB custom connector. Carries its own AbuseIPDB API key inside the connection resource. |
 | Static-site storage account | External | Hosts the blocklist blob (`$web/index.html`). |
 
-The Sentinel connection is used by the **trigger**, `entities/ip`, and the source-incident lifecycle: a managed-identity `GET` to the SecurityInsights management REST API finds the two source incidents by title, then the azuresentinel connector `PUT /Incidents` (status Active at start, status Closed + classification TruePositive at end) and `POST /Incidents/Comment` (fallback path) update them. The workspace is `LogAnalyticsResourceID` (default `lsy-prd-oms`).
+The Sentinel connection is used by the **trigger**, `entities/ip`, and the incident lifecycle: a managed-identity `GET` to the SecurityInsights management REST API finds the two source incidents by title (the relay incident's id comes straight from the trigger), then the azuresentinel connector `PUT /Incidents` (status Active at start, status Closed + classification TruePositive at end) and `POST /Incidents/Comment` (fallback path) update the relay incident and both source incidents. The workspace is `LogAnalyticsResourceID` (default `lsy-prd-oms`).
 
 AbuseIPDB calls go through the OMS-owned custom connector (cross-RG reference). This playbook references the existing connection by resource ID; it does not create, modify, or rotate it.
 
@@ -124,7 +124,7 @@ Defaults: `MinReports = 100`; `ExcludedISPs = ["akamai technologies", "google", 
 
 ### AbuseIPDB outage → manual-intervention fallback
 
-`AbuseIPDB_health_check` runs right after `Walk_to_Planning`, **before** the change is advanced to Implementation. If it fails (`Failed`/`TimedOut`), `Fallback_Manual_Intervention` runs instead of the Implementation walk + `Enrichment_Scope`. **Nothing is blocked** — the raw, un-enriched incident IPs are deliberately *not* pushed to the blocklist, because they bypass the report-threshold and ISP-exclusion filtering and could include IPs that must never be blocked. Instead the scope: builds a CSV of all incident IPs (`Select_Fallback_Rows` → `Build_Fallback_CSV`), attaches it (`Attach_Fallback_CSV`), posts a "manual intervention required" comment (`Comment_Manual_Intervention`), assigns the change to SecOps (`Assign_To_SecOps`, `PUT /assignee` = `MainTicketAssigneeName`), and **leaves the change in Planning** (no transition); then `Comment_Source_Incidents` comments the source incidents and `Set_Outcome_Fallback` marks `Run_Outcome='fallback'`. The success handler's else-branch then moves the run-record sub-task to **On Hold** and ends the run `Succeeded` (handled outcome, no failure alert). **Fallback runs after `AbuseIPDB_health_check [Failed, TimedOut]` only — not `Skipped`:** a Planning-stage failure Skips the health check and must route to the failure handler (sub-task On Hold, run Failed), not be mislabeled an AbuseIPDB outage.
+`AbuseIPDB_health_check` runs right after `Walk_to_Planning`, **before** the change is advanced to Implementation. If it fails (`Failed`/`TimedOut`), `Fallback_Manual_Intervention` runs instead of the Implementation walk + `Enrichment_Scope`. **Nothing is blocked** — the raw, un-enriched incident IPs are deliberately *not* pushed to the blocklist, because they bypass the report-threshold and ISP-exclusion filtering and could include IPs that must never be blocked. Instead the scope: builds a CSV of all incident IPs (`Select_Fallback_Rows` → `Build_Fallback_CSV`), attaches it (`Attach_Fallback_CSV`), posts a "manual intervention required" comment (`Comment_Manual_Intervention`), assigns the change to SecOps (`Assign_To_SecOps`, `PUT /assignee` = `MainTicketAssigneeName`), and **leaves the change in Planning** (no transition); then `Comment_Source_Incidents` comments the relay and source incidents and `Set_Outcome_Fallback` marks `Run_Outcome='fallback'`. The success handler's else-branch then moves the run-record sub-task to **On Hold** and ends the run `Succeeded` (handled outcome, no failure alert). **Fallback runs after `AbuseIPDB_health_check [Failed, TimedOut]` only — not `Skipped`:** a Planning-stage failure Skips the health check and must route to the failure handler (sub-task On Hold, run Failed), not be mislabeled an AbuseIPDB outage.
 
 ## Blocklist update semantics (ungated)
 

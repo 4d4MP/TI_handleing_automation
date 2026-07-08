@@ -23,7 +23,7 @@ rolling back a block.
    **Post-implementation review**.
 5. **On success the run STOPS at Post-implementation review:** the change is assigned to
    **SecOps** (`MainTicketAssigneeName`), the run-record sub-task is moved to **Resolved**,
-   and the two source incidents are moved to **Closed / TruePositive** (comment
+   and the relay incident **and** the two source incidents are moved to **Closed / TruePositive** (comment
    `Automatically handled in <OPSLSY change key>`). The change is **left in Post-implementation
    review** for a human to review and close — the automation does **not** close it.
 6. **On any failure** after the sub-task is created, the run-record sub-task is moved to
@@ -37,14 +37,14 @@ incident IPs, posts a comment that AbuseIPDB failed and manual intervention is r
 assigns the change to **SecOps** (`MainTicketAssigneeName`), and **leaves it in Planning**. The
 blocklist blob is untouched, the run-record sub-task is moved to **On Hold**, and the Logic
 App run still ends **Succeeded**. A SecOps engineer must review the attached IPs and apply/close
-the change by hand. On this path the two source Sentinel incidents are **left Active** and a
+the change by hand. On this path the relay and the two source Sentinel incidents are **left Active** and a
 comment is posted on each noting AbuseIPDB was unavailable, nothing was blocked, and manual
 intervention is required (referencing the OPSLSY change key) — they are **not** auto-closed.
 
-The playbook drives the two source Sentinel incidents' lifecycle (Active at start; Closed /
-TruePositive on success, or a manual-intervention comment on the fallback). It does not touch
-the relay incident that triggers the automation rule. To see what a run did, open the OPSLSY
-change (description, attachment, history), the source incidents, and/or the blocklist blob.
+The playbook drives the relay (trigger) incident **and** the two source Sentinel incidents'
+lifecycle (Active at start; Closed / TruePositive on success, or a manual-intervention comment
+on the fallback). To see what a run did, open the OPSLSY change (description, attachment,
+history), those incidents, and/or the blocklist blob.
 
 ## Finding the change for an incident
 

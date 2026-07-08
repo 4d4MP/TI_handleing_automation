@@ -77,7 +77,7 @@
                         "type": "SetVariable",
                         "inputs": {
                             "name": "Incident_Arm_Ids",
-                            "value": "@body('Build_Incident_Ids')"
+                            "value": "@union(if(empty(coalesce(triggerBody()?['object']?['id'], '')), json('[]'), array(replace(triggerBody()?['object']?['id'], 'https://management.azure.com', ''))), body('Build_Incident_Ids'))"
                         },
                         "runAfter": {
                             "Build_Incident_Ids": [
